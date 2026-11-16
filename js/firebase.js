@@ -52,12 +52,18 @@ const Cloud = (() => {
     });
   }
 
-  function stripPhotos(inspection) {
+  function toCloud(inspection) {
     const copy = JSON.parse(JSON.stringify(inspection));
-    delete copy.roomPhoto;
+    if (copy.roomPhotoCloud) copy.roomPhoto = copy.roomPhotoCloud;
+    else delete copy.roomPhoto;
+    delete copy.roomPhotoCloud;
     if (copy.items) {
       Object.values(copy.items).forEach(st => {
-        if (st.remark) delete st.remark.photo;
+        if (st.remark) {
+          if (st.remark.photoCloud) st.remark.photo = st.remark.photoCloud;
+          else delete st.remark.photo;
+          delete st.remark.photoCloud;
+        }
       });
     }
     return copy;
@@ -78,7 +84,7 @@ const Cloud = (() => {
   async function push(inspection) {
     try {
       if (!await init()) return false;
-      await db.ref("inspections/" + inspection.id).set(stripPhotos(inspection));
+      await db.ref("inspections/" + inspection.id).set(toCloud(inspection));
       lastError = null;
       return true;
     } catch (e) {

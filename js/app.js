@@ -268,11 +268,13 @@ const inputRoomPhoto = document.getElementById("input-room-photo");
 const roomPreview = document.getElementById("room-photo-preview");
 const roomPlaceholder = document.getElementById("room-photo-placeholder");
 let newRoomPhoto = null;
+let newRoomPhotoCloud = null;
 let newRoom = null;
 
 function openNew(room) {
   newRoom = room;
   newRoomPhoto = null;
+  newRoomPhotoCloud = null;
   roomPreview.hidden = true;
   roomPreview.removeAttribute("src");
   roomPlaceholder.style.display = "";
@@ -293,6 +295,7 @@ inputRoomPhoto.addEventListener("change", async () => {
   if (!file) return;
   try {
     newRoomPhoto = await compressImage(file, 1024, 0.7);
+    newRoomPhotoCloud = await compressImage(file, 640, 0.5);
     roomPreview.src = newRoomPhoto;
     roomPreview.hidden = false;
     roomPlaceholder.style.display = "none";
@@ -316,6 +319,7 @@ document.getElementById("btn-start-checklist").addEventListener("click", () => {
     finishedAt: null,
     date: `${formatDate(now)} ${formatTime(now)}`,
     roomPhoto: newRoomPhoto,
+    roomPhotoCloud: newRoomPhotoCloud,
     items: {},
     updatedAt: now.getTime()
   };
@@ -486,6 +490,7 @@ const remarkPhotoInput = document.getElementById("input-remark-photo");
 const remarkPhotoWrap = document.getElementById("remark-photo-preview-wrap");
 const remarkPhotoPreview = document.getElementById("remark-photo-preview");
 let remarkPhotoData = null;
+let remarkPhotoCloud = null;
 
 function openRemarkModal(key, itemName) {
   pendingRemarkKey = key;
@@ -493,6 +498,7 @@ function openRemarkModal(key, itemName) {
   const st = insp.items[key];
   remarkText.value = st.remark?.text || "";
   remarkPhotoData = st.remark?.photo || null;
+  remarkPhotoCloud = st.remark?.photoCloud || null;
   remarkPhotoPreview.src = remarkPhotoData || "";
   remarkPhotoWrap.hidden = !remarkPhotoData;
   document.getElementById("remark-subtitle").textContent = `Équipement : ${itemName}`;
@@ -504,6 +510,7 @@ function closeRemarkModal() {
   modal.hidden = true;
   pendingRemarkKey = null;
   remarkPhotoData = null;
+  remarkPhotoCloud = null;
   remarkText.value = "";
   remarkPhotoWrap.hidden = true;
 }
@@ -513,6 +520,7 @@ remarkPhotoInput.addEventListener("change", async () => {
   if (!file) return;
   try {
     remarkPhotoData = await compressImage(file, 1024, 0.7);
+    remarkPhotoCloud = await compressImage(file, 640, 0.5);
     remarkPhotoPreview.src = remarkPhotoData;
     remarkPhotoWrap.hidden = false;
   } catch {
@@ -523,6 +531,7 @@ remarkPhotoInput.addEventListener("change", async () => {
 
 document.getElementById("btn-remove-remark-photo").addEventListener("click", () => {
   remarkPhotoData = null;
+  remarkPhotoCloud = null;
   remarkPhotoWrap.hidden = true;
 });
 
@@ -541,7 +550,8 @@ document.getElementById("btn-remark-save").addEventListener("click", () => {
     showToast("Remarque vide : texte ou photo requis");
     return;
   }
-  getInspection(currentId).items[pendingRemarkKey].remark = { text, photo: remarkPhotoData };
+  getInspection(currentId).items[pendingRemarkKey].remark =
+    { text, photo: remarkPhotoData, photoCloud: remarkPhotoCloud };
   touch();
   closeRemarkModal();
   renderChecklist();
@@ -578,9 +588,7 @@ function reportFileName(insp) {
   return `${ymd}_RAP_INSPCH${room}_${person}.pdf`;
 }
 
-async function buildReportPdf(insp) {
-  const JsPDF = await loadJsPDF();
-  const doc = new JsPDF({ unit: "mm", format: "a4" });
+function makeReportRenderer(doc) {
   const M = 15;
   const W = 210 - 2 * M;
   const MAX_Y = 280;
@@ -590,108 +598,148 @@ async function buildReportPdf(insp) {
     if (y + h > MAX_Y) { doc.addPage(); y = M; }
   };
 
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(16);
-  doc.text("FICHE REVISION CHAMBRE", 105, 20, { align: "center" });
-  doc.setDrawColor(15, 118, 110);
-  doc.setLineWidth(0.8);
-  doc.line(M, 25, 210 - M, 25);
+  const photoOf = (o) => (o && (o.photo || o.photoCloud)) || null;
 
-  doc.setFontSize(10);
-  doc.setFont("helvetica", "normal");
-  const info = [
-    `Trimestre : ${insp.quarter}`,
-    `Date : ${insp.date}`,
-    `Chambre : ${insp.room}`,
-    `Personne : ${insp.person}`
-  ];
-  y = 34;
-  info.forEach((line, i) => {
-    doc.text(line, M + (i % 2) * (W / 2), y + Math.floor(i / 2) * 6);
-  });
-  y += 16;
-
-  for (const [ci, cat] of CHECKLIST.entries()) {
-    ensureSpace(14);
+  async function render(insp) {
+    y = 20;
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(12);
-    doc.setTextColor(15, 118, 110);
-    doc.text(cat.category.toUpperCase(), M, y);
-    doc.setTextColor(0, 0, 0);
-    y += 3;
-    doc.setDrawColor(200, 200, 200);
-    doc.setLineWidth(0.3);
-    doc.line(M, y, 210 - M, y);
-    y += 6;
+    doc.setFontSize(16);
+    doc.text("FICHE REVISION CHAMBRE", 105, y, { align: "center" });
+    doc.setDrawColor(15, 118, 110);
+    doc.setLineWidth(0.8);
+    doc.line(M, 25, 210 - M, 25);
 
-    for (const [ii, item] of cat.items.entries()) {
-      const st = insp.items[itemKey(ci, ii)];
-      const detail = splitDetail(item.detail);
-      const done = st && st.actions.every(Boolean);
+    doc.setFontSize(10);
+    doc.setFont("helvetica", "normal");
+    const info = [
+      `Trimestre : ${insp.quarter}`,
+      `Date : ${insp.date}`,
+      `Chambre : ${insp.room}`,
+      `Personne : ${insp.person}`
+    ];
+    y = 34;
+    info.forEach((line, i) => {
+      doc.text(line, M + (i % 2) * (W / 2), y + Math.floor(i / 2) * 6);
+    });
+    y += 16;
 
+    for (const [ci, cat] of CHECKLIST.entries()) {
+      ensureSpace(14);
       doc.setFont("helvetica", "bold");
-      doc.setFontSize(10);
-      doc.text(`${done ? "[X]" : "[ ]"} ${item.name}`, M, y);
-      y += 5;
-
-      if (st) {
-        doc.setFont("helvetica", "normal");
-        doc.setFontSize(9);
-        doc.setTextColor(90, 90, 90);
-        const steps = detail.map((a, i) => `${st.actions[i] ? "X" : "-"} ${a}`).join("   ");
-        const lines = doc.splitTextToSize(steps, W - 4);
-        ensureSpace(lines.length * 4.5);
-        doc.text(lines, M + 4, y);
-        y += lines.length * 4.5;
-        doc.setTextColor(0, 0, 0);
-      } else {
-        doc.setFont("helvetica", "italic");
-        doc.setFontSize(9);
-        doc.setTextColor(150, 150, 150);
-        doc.text("Non controle", M + 4, y);
-        doc.setTextColor(0, 0, 0);
-        y += 4.5;
-      }
-
-      if (st?.remark && (st.remark.text || st.remark.photo)) {
-        doc.setFont("helvetica", "bold");
-        doc.setFontSize(9);
-        doc.setTextColor(180, 83, 9);
-        doc.text("Remarque :", M + 4, y);
-        y += 4.5;
-        doc.setFont("helvetica", "normal");
-        if (st.remark.text) {
-          doc.setTextColor(60, 60, 60);
-          const rlines = doc.splitTextToSize(st.remark.text, W - 8);
-          ensureSpace(rlines.length * 4.5);
-          doc.text(rlines, M + 8, y);
-          y += rlines.length * 4.5;
-        }
-        if (st.remark.photo) {
-          try {
-            const dim = await getImageSize(st.remark.photo);
-            const pw = 60;
-            const ph = Math.min(70, pw * dim.h / dim.w);
-            const pwFinal = ph === 70 ? 70 * dim.w / dim.h : pw;
-            ensureSpace(ph + 4);
-            doc.addImage(st.remark.photo, "JPEG", M + 8, y, pwFinal, ph);
-            y += ph + 4;
-          } catch {
-            doc.setFontSize(8);
-            doc.setTextColor(150, 150, 150);
-            doc.text("(photo indisponible)", M + 8, y);
-            y += 4;
-            doc.setTextColor(0, 0, 0);
-          }
-        }
-        doc.setTextColor(0, 0, 0);
-      }
+      doc.setFontSize(12);
+      doc.setTextColor(15, 118, 110);
+      doc.text(cat.category.toUpperCase(), M, y);
+      doc.setTextColor(0, 0, 0);
       y += 3;
+      doc.setDrawColor(200, 200, 200);
+      doc.setLineWidth(0.3);
+      doc.line(M, y, 210 - M, y);
+      y += 6;
+
+      for (const [ii, item] of cat.items.entries()) {
+        const st = insp.items[itemKey(ci, ii)];
+        const detail = splitDetail(item.detail);
+        const done = st && st.actions.every(Boolean);
+
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(10);
+        doc.text(`${done ? "[X]" : "[ ]"} ${item.name}`, M, y);
+        y += 5;
+
+        if (st) {
+          doc.setFont("helvetica", "normal");
+          doc.setFontSize(9);
+          doc.setTextColor(90, 90, 90);
+          const steps = detail.map((a, i) => `${st.actions[i] ? "X" : "-"} ${a}`).join("   ");
+          const lines = doc.splitTextToSize(steps, W - 4);
+          ensureSpace(lines.length * 4.5);
+          doc.text(lines, M + 4, y);
+          y += lines.length * 4.5;
+          doc.setTextColor(0, 0, 0);
+        } else {
+          doc.setFont("helvetica", "italic");
+          doc.setFontSize(9);
+          doc.setTextColor(150, 150, 150);
+          doc.text("Non controle", M + 4, y);
+          doc.setTextColor(0, 0, 0);
+          y += 4.5;
+        }
+
+        if (st?.remark && (st.remark.text || photoOf(st.remark))) {
+          doc.setFont("helvetica", "bold");
+          doc.setFontSize(9);
+          doc.setTextColor(180, 83, 9);
+          doc.text("Remarque :", M + 4, y);
+          y += 4.5;
+          doc.setFont("helvetica", "normal");
+          if (st.remark.text) {
+            doc.setTextColor(60, 60, 60);
+            const rlines = doc.splitTextToSize(st.remark.text, W - 8);
+            ensureSpace(rlines.length * 4.5);
+            doc.text(rlines, M + 8, y);
+            y += rlines.length * 4.5;
+          }
+          const photo = photoOf(st.remark);
+          if (photo) {
+            try {
+              const dim = await getImageSize(photo);
+              const pw = 60;
+              const ph = Math.min(70, pw * dim.h / dim.w);
+              const pwFinal = ph === 70 ? 70 * dim.w / dim.h : pw;
+              ensureSpace(ph + 4);
+              doc.addImage(photo, "JPEG", M + 8, y, pwFinal, ph);
+              y += ph + 4;
+            } catch {
+              doc.setFontSize(8);
+              doc.setTextColor(150, 150, 150);
+              doc.text("(photo indisponible)", M + 8, y);
+              y += 4;
+              doc.setTextColor(0, 0, 0);
+            }
+          }
+          doc.setTextColor(0, 0, 0);
+        }
+        y += 3;
+      }
+      y += 4;
     }
-    y += 4;
   }
 
+  return { render };
+}
+
+async function buildReportPdf(insp) {
+  const JsPDF = await loadJsPDF();
+  const doc = new JsPDF({ unit: "mm", format: "a4" });
+  const renderer = makeReportRenderer(doc);
+  await renderer.render(insp);
   return doc;
+}
+
+async function compileQuarterPdf(q) {
+  showToast("Compilation des rapports…");
+  try {
+    const JsPDF = await loadJsPDF();
+    const doc = new JsPDF({ unit: "mm", format: "a4" });
+    const renderer = makeReportRenderer(doc);
+    const list = inspections
+      .filter(i => i.quarter === q && i.status === "terminee")
+      .sort((a, b) => ROOMS.indexOf(a.room) - ROOMS.indexOf(b.room));
+    if (!list.length) {
+      showToast("Aucune inspection terminée ce trimestre");
+      return;
+    }
+    for (const [idx, insp] of list.entries()) {
+      if (idx > 0) doc.addPage();
+      await renderer.render(insp);
+    }
+    const d = new Date();
+    const ymd = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`;
+    doc.save(`${ymd}_RAPPORTS_${q.replace("-T", "T")}.pdf`);
+    showToast(`${list.length} rapport(s) compilé(s) ✓`);
+  } catch {
+    showToast("Erreur : compilation indisponible (hors-ligne ?)");
+  }
 }
 
 async function sendReportEmail(insp, fileName) {
@@ -765,9 +813,10 @@ function openDetail(id) {
   const container = document.getElementById("detail-container");
   container.innerHTML = "";
 
-  if (insp.roomPhoto) {
+  const roomPhoto = insp.roomPhoto || insp.roomPhotoCloud;
+  if (roomPhoto) {
     const img = document.createElement("img");
-    img.src = insp.roomPhoto;
+    img.src = roomPhoto;
     img.alt = "Photo du numéro de chambre";
     img.style.cssText = "width:100%;border-radius:14px;margin-bottom:16px;";
     container.appendChild(img);
@@ -969,6 +1018,7 @@ async function generateRecapPdf() {
 }
 
 document.getElementById("btn-recap-pdf").addEventListener("click", generateRecapPdf);
+document.getElementById("btn-compile").addEventListener("click", () => compileQuarterPdf(recapQuarter));
 
 /* ============ Historique & analyses ============ */
 function collectRemarks(insp) {
@@ -984,7 +1034,7 @@ function collectRemarks(insp) {
         category: cat.category,
         equipment: item.name,
         text: st.remark.text || "",
-        photo: st.remark.photo || null
+        photo: st.remark.photo || st.remark.photoCloud || null
       });
     }
   }));
@@ -1194,15 +1244,19 @@ async function syncCloud() {
         inspections.push(rIns);
         changed = true;
       } else if ((rIns.updatedAt || 0) > (local.updatedAt || 0)) {
-        const keepPhoto = local.roomPhoto;
-        const photos = {};
+        const keepRoom = local.roomPhoto;
+        const keepRemarks = {};
         Object.entries(local.items || {}).forEach(([k, st]) => {
-          if (st?.remark?.photo) photos[k] = st.remark.photo;
+          if (st?.remark) keepRemarks[k] = st.remark;
         });
         Object.assign(local, rIns);
-        local.roomPhoto = keepPhoto || local.roomPhoto;
-        Object.entries(photos).forEach(([k, photo]) => {
-          if (local.items?.[k]?.remark) local.items[k].remark.photo = photo;
+        local.roomPhoto = keepRoom || local.roomPhoto;
+        Object.entries(keepRemarks).forEach(([k, keep]) => {
+          const st = local.items?.[k];
+          if (st?.remark) {
+            st.remark.photo = keep.photo || st.remark.photo;
+            st.remark.photoCloud = keep.photoCloud || st.remark.photoCloud;
+          }
         });
         changed = true;
       }
