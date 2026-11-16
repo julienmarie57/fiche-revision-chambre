@@ -1,4 +1,4 @@
-const CACHE_NAME = "fiche-revision-v2";
+const CACHE_NAME = "fiche-revision-v3";
 const APP_SHELL = [
   "./index.html",
   "./css/styles.css",
