@@ -1105,6 +1105,50 @@ document.getElementById("btn-export").addEventListener("click", () => {
   URL.revokeObjectURL(a.href);
 });
 
+function csvCell(v) {
+  return '"' + String(v ?? "").replace(/"/g, '""') + '"';
+}
+
+function downloadCsv(fileName, rows) {
+  const csv = "\ufeff" + rows.map(r => r.map(csvCell).join(";")).join("\r\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = fileName;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+document.getElementById("btn-export-csv").addEventListener("click", () => {
+  const done = inspections.filter(i => i.status === "terminee");
+  const d = new Date();
+  const ymd = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`;
+
+  downloadCsv(`remarques_${ymd}.csv`, [
+    ["Date", "Trimestre", "Chambre", "Personne", "Catégorie", "Équipement", "Remarque"],
+    ...done.flatMap(insp =>
+      collectRemarks(insp).map(r => [
+        formatShortDate(r.date), r.quarter, r.room, r.person, r.category, r.equipment, r.text
+      ])
+    )
+  ]);
+
+  downloadCsv(`inspections_${ymd}.csv`, [
+    ["Chambre", "Trimestre", "Personne", "Date début", "Date fin", "Équipements validés", "Total équipements", "Nb remarques"],
+    ...done.map(insp => {
+      const { done: ok, total } = itemProgress(insp);
+      return [
+        insp.room, insp.quarter, insp.person,
+        formatShortDate(insp.startedAt),
+        insp.finishedAt ? formatShortDate(insp.finishedAt) : "",
+        ok, total, collectRemarks(insp).length
+      ];
+    })
+  ]);
+
+  showToast("2 fichiers CSV téléchargés");
+});
+
 document.getElementById("input-import").addEventListener("change", (e) => {
   const file = e.target.files[0];
   if (!file) return;
