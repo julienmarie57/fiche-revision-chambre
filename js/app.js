@@ -775,6 +775,33 @@ document.getElementById("btn-export").addEventListener("click", () => {
   URL.revokeObjectURL(a.href);
 });
 
+/* ============ Import ============ */
+document.getElementById("input-import").addEventListener("change", (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const imported = JSON.parse(reader.result);
+      if (!Array.isArray(imported)) throw new Error("format");
+      let added = 0, skipped = 0;
+      imported.forEach(f => {
+        if (!f || !f.id || !Array.isArray(CHECKLIST)) return;
+        if (fiches.some(existing => existing.id === f.id)) { skipped++; return; }
+        fiches.push(f);
+        added++;
+      });
+      persist();
+      renderHome();
+      showToast(`${added} fiche(s) importée(s)${skipped ? `, ${skipped} déjà présente(s)` : ""}`);
+    } catch {
+      showToast("Fichier invalide");
+    }
+  };
+  reader.readAsText(file);
+  e.target.value = "";
+});
+
 /* ============ Démarrage ============ */
 renderHome();
 if ("serviceWorker" in navigator) {
