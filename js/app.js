@@ -607,93 +607,76 @@ function makeReportRenderer(doc) {
 
   function headerBand(insp) {
     doc.setFillColor(...TEAL);
-    doc.rect(0, 0, 210, 26, "F");
+    doc.rect(0, 0, 210, 22, "F");
     doc.setTextColor(255, 255, 255);
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(15);
-    doc.text("FICHE RÉVISION CHAMBRE", M, 11);
+    doc.setFontSize(13);
+    doc.text("FICHE RÉVISION CHAMBRE", M, 9.5);
     doc.setFont("helvetica", "normal");
-    doc.setFontSize(8.5);
-    doc.text(`${insp.quarter}   ·   ${insp.date}   ·   ${insp.person}`, M, 19.5);
+    doc.setFontSize(7.5);
+    doc.text(`${insp.quarter}   ·   ${insp.date}   ·   ${insp.person}`, M, 16.5);
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(18);
-    doc.text(`CH. ${insp.room}`, 210 - M, 17.5, { align: "right" });
-    y = 34;
+    doc.setFontSize(16);
+    doc.text(`CH. ${insp.room}`, 210 - M, 15.5, { align: "right" });
+    y = 29;
   }
 
   function categoryBand(name, doneCount, total) {
-    ensureSpace(10);
+    ensureSpace(9);
     doc.setFillColor(230, 244, 241);
-    doc.rect(M, y - 3.8, W, 6.6, "F");
+    doc.rect(M, y - 3.4, W, 5.8, "F");
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(9.5);
+    doc.setFontSize(8.5);
     doc.setTextColor(...TEAL);
     doc.text(name.toUpperCase(), M + 2, y);
-    doc.setFontSize(8);
+    doc.setFontSize(7);
     doc.setTextColor(...GRAY);
     doc.text(`${doneCount}/${total}`, 210 - M - 2, y, { align: "right" });
-    y += 8.5;
+    y += 7.6;
   }
 
-  function layoutCell(item, st, colW) {
-    const detail = splitDetail(item.detail);
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(7.5);
-    const lines = [];
-    let cur = [];
-    let curW = 0;
-    detail.forEach((a, i) => {
-      const w = doc.getTextWidth(a) + 3.2;
-      if (cur.length && curW + w > colW - 6) {
-        lines.push(cur);
-        cur = [];
-        curW = 0;
-      }
-      cur.push({ label: a, ok: st ? !!st.actions[i] : false });
-      curW += w;
-    });
-    if (cur.length) lines.push(cur);
-    return {
-      name: item.name,
-      done: st && st.actions.every(Boolean),
-      lines,
-      h: 4.4 + lines.length * 3.6 + 1.6
-    };
-  }
-
-  function drawCell(cell, x, yy, colW) {
-    if (cell.done) {
+  function drawCheck(done, x, yy) {
+    if (done) {
       doc.setFillColor(...GREEN);
-      doc.circle(x + 1.7, yy - 1.1, 1.5, "F");
+      doc.circle(x + 1.4, yy - 0.9, 1.3, "F");
     } else {
       doc.setDrawColor(...RED);
-      doc.setLineWidth(0.5);
-      doc.circle(x + 1.7, yy - 1.1, 1.5);
+      doc.setLineWidth(0.45);
+      doc.circle(x + 1.4, yy - 0.9, 1.3);
     }
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(9);
-    doc.setTextColor(15, 23, 42);
-    doc.text(cell.name, x + 5.4, yy);
-    let ay = yy + 4.1;
+  }
+
+  async function remarkRow(equipName, remark) {
+    let photo = photoOf(remark);
+    let pw = 0, ph = 0;
+    if (photo) {
+      try {
+        const dim = await getImageSize(photo);
+        ph = 15;
+        pw = Math.min(20, ph * dim.w / dim.h);
+        ph = pw === 20 ? 20 * dim.h / dim.w : ph;
+      } catch { photo = null; }
+    }
+    const textW = W - (pw ? pw + 3 : 0);
     doc.setFont("helvetica", "normal");
     doc.setFontSize(7.5);
-    cell.lines.forEach(line => {
-      let ax = x + 5.4;
-      line.forEach(tok => {
-        if (tok.ok) {
-          doc.setFillColor(...GREEN);
-          doc.circle(ax + 0.6, ay - 0.8, 0.6, "F");
-        } else {
-          doc.setDrawColor(...RED);
-          doc.setLineWidth(0.35);
-          doc.circle(ax + 0.6, ay - 0.8, 0.6);
-        }
-        doc.setTextColor(71, 85, 105);
-        doc.text(tok.label, ax + 2.4, ay);
-        ax += doc.getTextWidth(tok.label) + 5.6;
-      });
-      ay += 3.6;
-    });
+    const bodyLines = remark.text ? doc.splitTextToSize(remark.text, textW) : [];
+    const h = Math.max(ph, 3.2 + bodyLines.length * 3.3) + 1.6;
+    ensureSpace(h);
+    if (photo) {
+      try { doc.addImage(photo, "JPEG", M, y, pw, ph); } catch {}
+    }
+    const tx = M + (pw ? pw + 3 : 0);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(7.5);
+    doc.setTextColor(...AMBER);
+    doc.text(equipName, tx, y + 2.4);
+    if (bodyLines.length) {
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(51, 65, 85);
+      doc.text(bodyLines, tx, y + 5.6);
+    }
+    y += h;
   }
 
   async function remarksSection(remarks) {
@@ -760,25 +743,31 @@ function makeReportRenderer(doc) {
       }).length;
       categoryBand(cat.category, doneCount, items.length);
 
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(8);
       for (let ii = 0; ii < items.length; ii += 2) {
-        const c1 = layoutCell(items[ii], insp.items[itemKey(ci, ii)], W / 2);
-        const c2 = ii + 1 < items.length
-          ? layoutCell(items[ii + 1], insp.items[itemKey(ci, ii + 1)], W / 2)
-          : null;
-        const rowH = Math.max(c1.h, c2 ? c2.h : 0);
-        ensureSpace(rowH + 2);
-        drawCell(c1, M, y + 3, W / 2);
-        if (c2) drawCell(c2, M + W / 2, y + 3, W / 2);
-        y += rowH + 1;
-        doc.setDrawColor(226, 232, 240);
-        doc.setLineWidth(0.2);
-        doc.line(M, y, 210 - M, y);
-        y += 1.5;
+        const st1 = insp.items[itemKey(ci, ii)];
+        const st2 = ii + 1 < items.length ? insp.items[itemKey(ci, ii + 1)] : null;
+        ensureSpace(5.6);
+        drawCheck(st1 && st1.actions.every(Boolean), M, y + 2.8);
+        doc.setTextColor(15, 23, 42);
+        doc.text(items[ii].name, M + 4.2, y + 2.8);
+        if (st2) {
+          drawCheck(st2 && st2.actions.every(Boolean), M + W / 2, y + 2.8);
+          doc.setTextColor(15, 23, 42);
+          doc.text(items[ii + 1].name, M + W / 2 + 4.2, y + 2.8);
+        }
+        y += 5.6;
       }
-      y += 2.5;
-    }
 
-    await remarksSection(collectRemarks(insp));
+      for (const [ii, item] of items.entries()) {
+        const st = insp.items[itemKey(ci, ii)];
+        if (st?.remark && (st.remark.text || photoOf(st.remark))) {
+          await remarkRow(item.name, st.remark);
+        }
+      }
+      y += 2;
+    }
   }
 
   return { render, remarksSection, ensureSpace, getY: () => y, setY: v => { y = v; }, M, W };
