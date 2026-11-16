@@ -1,4 +1,4 @@
-const CACHE_NAME = "fiche-revision-v3";
+const CACHE_NAME = "fiche-revision-v4";
 const APP_SHELL = [
   "./index.html",
   "./css/styles.css",
@@ -30,7 +30,15 @@ self.addEventListener("fetch", (event) => {
 
   if (url.origin === self.location.origin) {
     event.respondWith(
-      caches.match(event.request).then((cached) => cached || fetch(event.request))
+      fetch(event.request)
+        .then((response) => {
+          if (response.ok) {
+            const clone = response.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+          }
+          return response;
+        })
+        .catch(() => caches.match(event.request))
     );
     return;
   }
