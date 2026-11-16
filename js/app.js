@@ -589,9 +589,14 @@ function reportFileName(insp) {
 }
 
 function makeReportRenderer(doc) {
-  const M = 15;
+  const M = 12;
   const W = 210 - 2 * M;
-  const MAX_Y = 280;
+  const MAX_Y = 283;
+  const TEAL = [15, 118, 110];
+  const GREEN = [22, 163, 74];
+  const RED = [185, 28, 28];
+  const GRAY = [100, 116, 139];
+  const AMBER = [180, 83, 9];
   let y = 0;
 
   const ensureSpace = (h) => {
@@ -600,112 +605,195 @@ function makeReportRenderer(doc) {
 
   const photoOf = (o) => (o && (o.photo || o.photoCloud)) || null;
 
-  async function render(insp) {
-    y = 20;
+  function headerBand(insp) {
+    doc.setFillColor(...TEAL);
+    doc.rect(0, 0, 210, 26, "F");
+    doc.setTextColor(255, 255, 255);
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(16);
-    doc.text("FICHE REVISION CHAMBRE", 105, y, { align: "center" });
-    doc.setDrawColor(15, 118, 110);
-    doc.setLineWidth(0.8);
-    doc.line(M, 25, 210 - M, 25);
-
-    doc.setFontSize(10);
+    doc.setFontSize(15);
+    doc.text("FICHE RÉVISION CHAMBRE", M, 11);
     doc.setFont("helvetica", "normal");
-    const info = [
-      `Trimestre : ${insp.quarter}`,
-      `Date : ${insp.date}`,
-      `Chambre : ${insp.room}`,
-      `Personne : ${insp.person}`
-    ];
+    doc.setFontSize(8.5);
+    doc.text(`${insp.quarter}   ·   ${insp.date}   ·   ${insp.person}`, M, 19.5);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(18);
+    doc.text(`CH. ${insp.room}`, 210 - M, 17.5, { align: "right" });
     y = 34;
-    info.forEach((line, i) => {
-      doc.text(line, M + (i % 2) * (W / 2), y + Math.floor(i / 2) * 6);
-    });
-    y += 16;
+  }
 
-    for (const [ci, cat] of CHECKLIST.entries()) {
-      ensureSpace(14);
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(12);
-      doc.setTextColor(15, 118, 110);
-      doc.text(cat.category.toUpperCase(), M, y);
-      doc.setTextColor(0, 0, 0);
-      y += 3;
-      doc.setDrawColor(200, 200, 200);
-      doc.setLineWidth(0.3);
-      doc.line(M, y, 210 - M, y);
-      y += 6;
+  function categoryBand(name, doneCount, total) {
+    ensureSpace(10);
+    doc.setFillColor(230, 244, 241);
+    doc.rect(M, y - 3.8, W, 6.6, "F");
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(9.5);
+    doc.setTextColor(...TEAL);
+    doc.text(name.toUpperCase(), M + 2, y);
+    doc.setFontSize(8);
+    doc.setTextColor(...GRAY);
+    doc.text(`${doneCount}/${total}`, 210 - M - 2, y, { align: "right" });
+    y += 8.5;
+  }
 
-      for (const [ii, item] of cat.items.entries()) {
-        const st = insp.items[itemKey(ci, ii)];
-        const detail = splitDetail(item.detail);
-        const done = st && st.actions.every(Boolean);
-
-        doc.setFont("helvetica", "bold");
-        doc.setFontSize(10);
-        doc.text(`${done ? "[X]" : "[ ]"} ${item.name}`, M, y);
-        y += 5;
-
-        if (st) {
-          doc.setFont("helvetica", "normal");
-          doc.setFontSize(9);
-          doc.setTextColor(90, 90, 90);
-          const steps = detail.map((a, i) => `${st.actions[i] ? "X" : "-"} ${a}`).join("   ");
-          const lines = doc.splitTextToSize(steps, W - 4);
-          ensureSpace(lines.length * 4.5);
-          doc.text(lines, M + 4, y);
-          y += lines.length * 4.5;
-          doc.setTextColor(0, 0, 0);
-        } else {
-          doc.setFont("helvetica", "italic");
-          doc.setFontSize(9);
-          doc.setTextColor(150, 150, 150);
-          doc.text("Non controle", M + 4, y);
-          doc.setTextColor(0, 0, 0);
-          y += 4.5;
-        }
-
-        if (st?.remark && (st.remark.text || photoOf(st.remark))) {
-          doc.setFont("helvetica", "bold");
-          doc.setFontSize(9);
-          doc.setTextColor(180, 83, 9);
-          doc.text("Remarque :", M + 4, y);
-          y += 4.5;
-          doc.setFont("helvetica", "normal");
-          if (st.remark.text) {
-            doc.setTextColor(60, 60, 60);
-            const rlines = doc.splitTextToSize(st.remark.text, W - 8);
-            ensureSpace(rlines.length * 4.5);
-            doc.text(rlines, M + 8, y);
-            y += rlines.length * 4.5;
-          }
-          const photo = photoOf(st.remark);
-          if (photo) {
-            try {
-              const dim = await getImageSize(photo);
-              const pw = 60;
-              const ph = Math.min(70, pw * dim.h / dim.w);
-              const pwFinal = ph === 70 ? 70 * dim.w / dim.h : pw;
-              ensureSpace(ph + 4);
-              doc.addImage(photo, "JPEG", M + 8, y, pwFinal, ph);
-              y += ph + 4;
-            } catch {
-              doc.setFontSize(8);
-              doc.setTextColor(150, 150, 150);
-              doc.text("(photo indisponible)", M + 8, y);
-              y += 4;
-              doc.setTextColor(0, 0, 0);
-            }
-          }
-          doc.setTextColor(0, 0, 0);
-        }
-        y += 3;
+  function layoutCell(item, st, colW) {
+    const detail = splitDetail(item.detail);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(7.5);
+    const lines = [];
+    let cur = [];
+    let curW = 0;
+    detail.forEach((a, i) => {
+      const w = doc.getTextWidth(a) + 3.2;
+      if (cur.length && curW + w > colW - 6) {
+        lines.push(cur);
+        cur = [];
+        curW = 0;
       }
-      y += 4;
+      cur.push({ label: a, ok: st ? !!st.actions[i] : false });
+      curW += w;
+    });
+    if (cur.length) lines.push(cur);
+    return {
+      name: item.name,
+      done: st && st.actions.every(Boolean),
+      lines,
+      h: 4.4 + lines.length * 3.6 + 1.6
+    };
+  }
+
+  function drawCell(cell, x, yy, colW) {
+    if (cell.done) {
+      doc.setFillColor(...GREEN);
+      doc.circle(x + 1.7, yy - 1.1, 1.5, "F");
+    } else {
+      doc.setDrawColor(...RED);
+      doc.setLineWidth(0.5);
+      doc.circle(x + 1.7, yy - 1.1, 1.5);
+    }
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(9);
+    doc.setTextColor(15, 23, 42);
+    doc.text(cell.name, x + 5.4, yy);
+    let ay = yy + 4.1;
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(7.5);
+    cell.lines.forEach(line => {
+      let ax = x + 5.4;
+      line.forEach(tok => {
+        if (tok.ok) {
+          doc.setFillColor(...GREEN);
+          doc.circle(ax + 0.6, ay - 0.8, 0.6, "F");
+        } else {
+          doc.setDrawColor(...RED);
+          doc.setLineWidth(0.35);
+          doc.circle(ax + 0.6, ay - 0.8, 0.6);
+        }
+        doc.setTextColor(71, 85, 105);
+        doc.text(tok.label, ax + 2.4, ay);
+        ax += doc.getTextWidth(tok.label) + 5.6;
+      });
+      ay += 3.6;
+    });
+  }
+
+  async function remarksSection(remarks) {
+    if (!remarks.length) return;
+    ensureSpace(14);
+    doc.setFillColor(254, 243, 199);
+    doc.rect(M, y - 3.8, W, 6.6, "F");
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(9.5);
+    doc.setTextColor(...AMBER);
+    doc.text(`REMARQUES (${remarks.length})`, M + 2, y);
+    y += 10;
+
+    for (const r of remarks) {
+      let photo = r.photo;
+      let pw = 0, ph = 0;
+      if (photo) {
+        try {
+          const dim = await getImageSize(photo);
+          ph = 24;
+          pw = Math.min(30, ph * dim.w / dim.h);
+          ph = pw === 30 ? 30 * dim.h / dim.w : ph;
+        } catch { photo = null; }
+      }
+      const textW = W - (pw ? pw + 4 : 0);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(8.5);
+      const bodyLines = r.text ? doc.splitTextToSize(r.text, textW) : [];
+      const h = Math.max(ph, 4 + 3.6 + 4 + bodyLines.length * 4) + 3;
+      ensureSpace(h);
+
+      if (photo) {
+        try { doc.addImage(photo, "JPEG", M, y, pw, ph); } catch {}
+      }
+      const tx = M + (pw ? pw + 4 : 0);
+      let ty = y + 2;
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(8.5);
+      doc.setTextColor(...AMBER);
+      doc.text(`${r.category} · ${r.equipment}`, tx, ty);
+      ty += 3.8;
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(7.5);
+      doc.setTextColor(...GRAY);
+      doc.text(`Chambre ${r.room} — ${r.person} · ${formatShortDate(r.date)}`, tx, ty);
+      ty += 4;
+      if (bodyLines.length) {
+        doc.setFontSize(8.5);
+        doc.setTextColor(30, 41, 59);
+        doc.text(bodyLines, tx, ty);
+      }
+      y += h;
     }
   }
 
-  return { render };
+  async function render(insp) {
+    headerBand(insp);
+
+    for (const [ci, cat] of CHECKLIST.entries()) {
+      const items = cat.items;
+      const doneCount = items.filter((_, ii) => {
+        const st = insp.items[itemKey(ci, ii)];
+        return st && st.actions.every(Boolean);
+      }).length;
+      categoryBand(cat.category, doneCount, items.length);
+
+      for (let ii = 0; ii < items.length; ii += 2) {
+        const c1 = layoutCell(items[ii], insp.items[itemKey(ci, ii)], W / 2);
+        const c2 = ii + 1 < items.length
+          ? layoutCell(items[ii + 1], insp.items[itemKey(ci, ii + 1)], W / 2)
+          : null;
+        const rowH = Math.max(c1.h, c2 ? c2.h : 0);
+        ensureSpace(rowH + 2);
+        drawCell(c1, M, y + 3, W / 2);
+        if (c2) drawCell(c2, M + W / 2, y + 3, W / 2);
+        y += rowH + 1;
+        doc.setDrawColor(226, 232, 240);
+        doc.setLineWidth(0.2);
+        doc.line(M, y, 210 - M, y);
+        y += 1.5;
+      }
+      y += 2.5;
+    }
+
+    await remarksSection(collectRemarks(insp));
+  }
+
+  return { render, remarksSection, ensureSpace, getY: () => y, setY: v => { y = v; }, M, W };
+}
+
+function addFooters(doc) {
+  const n = doc.getNumberOfPages();
+  for (let i = 1; i <= n; i++) {
+    doc.setPage(i);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(7);
+    doc.setTextColor(148, 163, 184);
+    doc.text(`Généré le ${new Date().toLocaleString("fr-FR")}`, 12, 291);
+    doc.text(`Page ${i}/${n}`, 198, 291, { align: "right" });
+  }
 }
 
 async function buildReportPdf(insp) {
@@ -713,6 +801,7 @@ async function buildReportPdf(insp) {
   const doc = new JsPDF({ unit: "mm", format: "a4" });
   const renderer = makeReportRenderer(doc);
   await renderer.render(insp);
+  addFooters(doc);
   return doc;
 }
 
@@ -733,6 +822,7 @@ async function compileQuarterPdf(q) {
       if (idx > 0) doc.addPage();
       await renderer.render(insp);
     }
+    addFooters(doc);
     const d = new Date();
     const ymd = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`;
     doc.save(`${ymd}_RAPPORTS_${q.replace("-T", "T")}.pdf`);
@@ -921,93 +1011,63 @@ async function generateRecapPdf() {
   try {
     const JsPDF = await loadJsPDF();
     const doc = new JsPDF({ unit: "mm", format: "a4" });
-    const M = 15;
-    const MAX_Y = 280;
-    let y = 0;
-    const ensureSpace = (h) => { if (y + h > MAX_Y) { doc.addPage(); y = M; } };
+    const renderer = makeReportRenderer(doc);
+    const M = renderer.M;
+    const W = renderer.W;
 
+    doc.setFillColor(15, 118, 110);
+    doc.rect(0, 0, 210, 26, "F");
+    doc.setTextColor(255, 255, 255);
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(16);
-    doc.text("RECAP TRIMESTRIEL - REVISION CHAMBRES", 105, 20, { align: "center" });
-    doc.setFontSize(11);
-    doc.text(quarterLabel(q), 105, 27, { align: "center" });
-    doc.setDrawColor(15, 118, 110);
-    doc.setLineWidth(0.8);
-    doc.line(M, 31, 210 - M, 31);
-    y = 40;
+    doc.setFontSize(15);
+    doc.text("RÉCAP TRIMESTRIEL", M, 11);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8.5);
+    doc.text("RÉVISION CHAMBRES — SYNTHÈSE", M, 19.5);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(13);
+    doc.text(quarterLabel(q), 210 - M, 17.5, { align: "right" });
+    renderer.setY(34);
 
     const inspectedRooms = inspections
       .filter(i => i.quarter === q && i.status === "terminee").map(i => i.room);
     const nonInspectees = ROOMS.filter(r => !inspectedRooms.includes(r));
 
+    renderer.ensureSpace(16);
+    let y = renderer.getY();
+    doc.setFillColor(254, 226, 226);
+    doc.rect(M, y - 3.8, W, 6.6, "F");
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(12);
-    doc.text("Chambres non inspectées", M, y);
-    y += 7;
+    doc.setFontSize(9.5);
+    doc.setTextColor(153, 27, 27);
+    doc.text(`CHAMBRES NON INSPECTÉES (${nonInspectees.length}/${ROOMS.length})`, M + 2, y);
+    y += 10;
     doc.setFont("helvetica", "normal");
-    doc.setFontSize(10);
-    if (nonInspectees.length) {
-      doc.text(nonInspectees.join("   "), M, y);
-      y += 8;
-    } else {
-      doc.text("Aucune - toutes les chambres ont été inspectées.", M, y);
-      y += 8;
-    }
-    y += 4;
+    doc.setFontSize(10.5);
+    doc.setTextColor(30, 41, 59);
+    doc.text(
+      nonInspectees.length ? nonInspectees.join("     ") : "Aucune — toutes les chambres ont été inspectées.",
+      M, y
+    );
+    y += 10;
+    renderer.setY(y);
 
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(12);
-    doc.text("Remarques par chambre", M, y);
-    y += 8;
-
-    const quarterInspections = inspections
+    const allRemarks = inspections
       .filter(i => i.quarter === q && i.status === "terminee")
-      .sort((a, b) => ROOMS.indexOf(a.room) - ROOMS.indexOf(b.room));
-    let any = false;
+      .sort((a, b) => ROOMS.indexOf(a.room) - ROOMS.indexOf(b.room))
+      .flatMap(collectRemarks);
 
-    for (const insp of quarterInspections) {
-      const remarks = collectRemarks(insp);
-      if (!remarks.length) continue;
-      any = true;
-      ensureSpace(10);
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(11);
-      doc.text(`Chambre ${insp.room} — ${insp.person}`, M, y);
-      y += 6;
-
-      for (const r of remarks) {
-        ensureSpace(12);
-        doc.setFont("helvetica", "bold");
-        doc.setFontSize(9);
-        doc.text(`${r.category} / ${r.equipment}`, M + 4, y);
-        y += 5;
-        doc.setFont("helvetica", "normal");
-        if (r.text) {
-          const lines = doc.splitTextToSize(r.text, 210 - 2 * M - 8);
-          ensureSpace(lines.length * 4.5);
-          doc.text(lines, M + 8, y);
-          y += lines.length * 4.5;
-        }
-        if (r.photo) {
-          try {
-            const dim = await getImageSize(r.photo);
-            const ph = Math.min(60, 50 * dim.h / dim.w);
-            const pw = Math.min(50, ph * dim.w / dim.h);
-            ensureSpace(ph + 4);
-            doc.addImage(r.photo, "JPEG", M + 8, y, pw, ph);
-            y += ph + 4;
-          } catch {}
-        }
-        y += 2;
-      }
-      y += 4;
-    }
-    if (!any) {
+    if (!allRemarks.length) {
+      renderer.ensureSpace(10);
       doc.setFont("helvetica", "normal");
       doc.setFontSize(10);
-      doc.text("Aucune remarque ce trimestre.", M, y);
+      doc.setTextColor(100, 116, 139);
+      doc.text("Aucune remarque ce trimestre.", M, renderer.getY());
+    } else {
+      await renderer.remarksSection(allRemarks);
     }
 
+    addFooters(doc);
     const d = new Date();
     const ymd = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`;
     doc.save(`${ymd}_REC_TRIM_${q.replace("-T", "T")}.pdf`);
