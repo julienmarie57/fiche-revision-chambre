@@ -14,10 +14,29 @@ const Cloud = (() => {
   let db = null;
   let lastError = null;
 
+  async function detectDatabaseUrl() {
+    const base = FIREBASE_CONFIG.databaseURL
+      ? FIREBASE_CONFIG.databaseURL.replace(/\.(europe-west1\.)?firebasedatabase\.app|\.firebaseio\.com$/, "")
+      : `https://${FIREBASE_CONFIG.projectId}-default-rtdb`;
+    const candidates = [
+      `${base}.europe-west1.firebasedatabase.app`,
+      `${base}.firebaseio.com`,
+      `${base}.firebasedatabase.app`
+    ];
+    for (const url of candidates) {
+      try {
+        const res = await fetch(`${url}/.json?shallow=true`);
+        if (res.ok) return url;
+      } catch {}
+    }
+    return FIREBASE_CONFIG.databaseURL || candidates[0];
+  }
+
   async function init() {
     if (!FIREBASE_ENABLED || db) return FIREBASE_ENABLED;
     await loadScript("https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js");
     await loadScript("https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js");
+    FIREBASE_CONFIG.databaseURL = await detectDatabaseUrl();
     firebase.initializeApp(FIREBASE_CONFIG);
     db = firebase.database();
     return true;
