@@ -646,39 +646,6 @@ function makeReportRenderer(doc) {
     }
   }
 
-  async function remarkRow(equipName, remark) {
-    let photo = photoOf(remark);
-    let pw = 0, ph = 0;
-    if (photo) {
-      try {
-        const dim = await getImageSize(photo);
-        ph = 15;
-        pw = Math.min(20, ph * dim.w / dim.h);
-        ph = pw === 20 ? 20 * dim.h / dim.w : ph;
-      } catch { photo = null; }
-    }
-    const textW = W - (pw ? pw + 3 : 0);
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(7.5);
-    const bodyLines = remark.text ? doc.splitTextToSize(remark.text, textW) : [];
-    const h = Math.max(ph, 3.2 + bodyLines.length * 3.3) + 1.6;
-    ensureSpace(h);
-    if (photo) {
-      try { doc.addImage(photo, "JPEG", M, y, pw, ph); } catch {}
-    }
-    const tx = M + (pw ? pw + 3 : 0);
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(7.5);
-    doc.setTextColor(...AMBER);
-    doc.text(equipName, tx, y + 2.4);
-    if (bodyLines.length) {
-      doc.setFont("helvetica", "normal");
-      doc.setTextColor(51, 65, 85);
-      doc.text(bodyLines, tx, y + 5.6);
-    }
-    y += h;
-  }
-
   async function remarksSection(remarks) {
     if (!remarks.length) return;
     ensureSpace(14);
@@ -743,30 +710,69 @@ function makeReportRenderer(doc) {
       }).length;
       categoryBand(cat.category, doneCount, items.length);
 
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(8);
+      const CW = W / 2;
       for (let ii = 0; ii < items.length; ii += 2) {
-        const st1 = insp.items[itemKey(ci, ii)];
-        const st2 = ii + 1 < items.length ? insp.items[itemKey(ci, ii + 1)] : null;
-        ensureSpace(5.6);
-        drawCheck(st1 && st1.actions.every(Boolean), M, y + 2.8);
-        doc.setTextColor(15, 23, 42);
-        doc.text(items[ii].name, M + 4.2, y + 2.8);
-        if (st2) {
-          drawCheck(st2 && st2.actions.every(Boolean), M + W / 2, y + 2.8);
-          doc.setTextColor(15, 23, 42);
-          doc.text(items[ii + 1].name, M + W / 2 + 4.2, y + 2.8);
+        const cells = [];
+        for (const idx of [ii, ii + 1]) {
+          if (idx >= items.length) { cells.push(null); continue; }
+          const st = insp.items[itemKey(ci, idx)];
+          const remark = st?.remark && (st.remark.text || photoOf(st.remark)) ? st.remark : null;
+          let rw = 0, rh = 0, lines = [];
+          if (remark) {
+            const photo = photoOf(remark);
+            if (photo) {
+              try {
+                const dim = await getImageSize(photo);
+                rh = 13;
+                rw = Math.min(17, rh * dim.w / dim.h);
+                rh = rw === 17 ? 17 * dim.h / dim.w : rh;
+              } catch {}
+            }
+            const textW = CW - (rw ? rw + 2.5 : 0) - 6;
+            doc.setFont("helvetica", "normal");
+            doc.setFontSize(7);
+            lines = remark.text ? doc.splitTextToSize(remark.text, textW) : [];
+          }
+          cells.push({
+            idx, st, remark, rw, rh, lines,
+            h: 5.6 + (remark ? Math.max(rh, lines.length * 3.1) + 2 : 0)
+          });
         }
-        y += 5.6;
-      }
 
-      for (const [ii, item] of items.entries()) {
-        const st = insp.items[itemKey(ci, ii)];
-        if (st?.remark && (st.remark.text || photoOf(st.remark))) {
-          await remarkRow(item.name, st.remark);
-        }
+        const rowH = Math.max(cells[0]?.h || 0, cells[1]?.h || 0);
+        ensureSpace(rowH + 1);
+
+        cells.forEach((c, col) => {
+          if (!c) return;
+          const x = M + col * CW;
+          drawCheck(c.st && c.st.actions.every(Boolean), x, y + 2.8);
+          doc.setFont("helvetica", "bold");
+          doc.setFontSize(8);
+          doc.setTextColor(15, 23, 42);
+          doc.text(items[c.idx].name, x + 4.2, y + 2.8);
+          if (c.remark) {
+            const rx = x + 3.5;
+            const ry = y + 6.4;
+            const remarkH = Math.max(c.rh, c.lines.length * 3.1);
+            doc.setFillColor(251, 191, 36);
+            doc.rect(rx - 1.2, ry - 0.4, 0.5, remarkH + 0.8, "F");
+            const photo = photoOf(c.remark);
+            if (photo && c.rw) {
+              try { doc.addImage(photo, "JPEG", rx, ry, c.rw, c.rh); } catch {}
+            }
+            if (c.lines.length) {
+              const tx = rx + (c.rw ? c.rw + 2.5 : 0);
+              doc.setFont("helvetica", "normal");
+              doc.setFontSize(7);
+              doc.setTextColor(51, 65, 85);
+              doc.text(c.lines, tx, ry + 2.4);
+            }
+          }
+        });
+
+        y += rowH + 0.8;
       }
-      y += 2;
+      y += 1.5;
     }
   }
 
