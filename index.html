@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#0f766e">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>Fiche Révision Chambre</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+
+  <!-- ============ ACCUEIL ============ -->
+  <section id="screen-home" class="screen active">
+    <header class="app-header">
+      <h1>Fiche Révision Chambre</h1>
+      <p class="subtitle">Maintenance des équipements</p>
+    </header>
+    <div class="container">
+      <button id="btn-new-fiche" class="btn btn-primary btn-block">
+        <span class="btn-icon">📷</span> Nouvelle fiche
+      </button>
+
+      <h2 class="section-title">Fiches en cours</h2>
+      <div id="list-en-cours" class="fiche-list"></div>
+
+      <h2 class="section-title">Fiches terminées</h2>
+      <div id="list-terminees" class="fiche-list"></div>
+
+      <div class="home-actions">
+        <button id="btn-export" class="btn btn-ghost">Exporter les données</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ NOUVELLE FICHE ============ -->
+  <section id="screen-new" class="screen">
+    <header class="app-header with-back">
+      <button class="btn-back" data-target="screen-home" aria-label="Retour">←</button>
+      <h1>Nouvelle fiche</h1>
+    </header>
+    <div class="container">
+      <div class="card">
+        <h2 class="card-title">1. Photographier le numéro de chambre</h2>
+        <p class="hint">Cadrez le numéro de porte et prenez la photo. Le numéro sera détecté automatiquement.</p>
+        <label class="photo-capture" id="room-photo-zone">
+          <input type="file" id="input-room-photo" accept="image/*" capture="environment" hidden>
+          <div id="room-photo-placeholder">
+            <span class="photo-icon">🚪</span>
+            <span>Prendre la photo</span>
+          </div>
+          <img id="room-photo-preview" alt="Photo du numéro de chambre" hidden>
+        </label>
+        <div id="ocr-status" class="ocr-status" hidden></div>
+      </div>
+
+      <div class="card">
+        <h2 class="card-title">2. Vérifier les informations</h2>
+        <div class="field">
+          <label for="fiche-chambre">Chambre</label>
+          <input type="text" id="fiche-chambre" inputmode="numeric" autocomplete="off" placeholder="N° de chambre">
+        </div>
+        <div class="field">
+          <label for="fiche-semaine">Semaine</label>
+          <input type="text" id="fiche-semaine" readonly>
+        </div>
+        <div class="field">
+          <label for="fiche-date">Date</label>
+          <input type="text" id="fiche-date" readonly>
+        </div>
+        <div class="field">
+          <label for="fiche-personne">Personne</label>
+          <input type="text" id="fiche-personne" autocomplete="name" placeholder="Nom du technicien">
+        </div>
+      </div>
+
+      <button id="btn-start-checklist" class="btn btn-primary btn-block" disabled>
+        Commencer la checklist
+      </button>
+    </div>
+  </section>
+
+  <!-- ============ CHECKLIST ============ -->
+  <section id="screen-checklist" class="screen">
+    <header class="app-header with-back">
+      <button class="btn-back" data-target="screen-home" aria-label="Accueil">←</button>
+      <div class="header-info">
+        <h1 id="cl-title">Chambre —</h1>
+        <p id="cl-meta"></p>
+      </div>
+    </header>
+    <div class="progress-wrap">
+      <div class="progress-bar"><div id="progress-fill"></div></div>
+      <span id="progress-label">0 / 0</span>
+    </div>
+    <div class="container" id="checklist-container"></div>
+    <div class="bottom-bar">
+      <button id="btn-finish" class="btn btn-primary btn-block" disabled>Terminer la fiche</button>
+    </div>
+  </section>
+
+  <!-- ============ DÉTAIL FICHE TERMINÉE ============ -->
+  <section id="screen-detail" class="screen">
+    <header class="app-header with-back">
+      <button class="btn-back" data-target="screen-home" aria-label="Accueil">←</button>
+      <div class="header-info">
+        <h1 id="detail-title">Chambre —</h1>
+        <p id="detail-meta"></p>
+      </div>
+    </header>
+    <div class="container" id="detail-container"></div>
+    <div class="bottom-bar">
+      <button id="btn-detail-report" class="btn btn-ghost btn-block">Éditer le rapport PDF</button>
+    </div>
+  </section>
+
+  <!-- ============ POP-UP RAPPORT ============ -->
+  <div id="modal-report" class="modal-overlay" hidden>
+    <div class="modal">
+      <h2>Éditer le rapport ?</h2>
+      <p class="modal-subtitle">La fiche sera clôturée. Un rapport PDF sera généré et joint à un e-mail à technique@csfds.be.</p>
+      <div class="modal-actions">
+        <button id="btn-report-no" class="btn btn-ghost">Non</button>
+        <button id="btn-report-yes" class="btn btn-primary">Oui</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ POP-UP REMARQUE ============ -->
+  <div id="modal-remark" class="modal-overlay" hidden>
+    <div class="modal">
+      <h2 id="remark-title">Une remarque ?</h2>
+      <p id="remark-subtitle" class="modal-subtitle"></p>
+      <textarea id="remark-text" rows="3" placeholder="Décrivez le problème ou la constatation…"></textarea>
+      <label class="btn btn-ghost btn-block remark-photo-btn">
+        <input type="file" id="input-remark-photo" accept="image/*" capture="environment" hidden>
+        📷 Ajouter une photo
+      </label>
+      <div id="remark-photo-preview-wrap" hidden>
+        <img id="remark-photo-preview" alt="Photo de la remarque">
+        <button id="btn-remove-remark-photo" class="btn btn-danger-small">Supprimer la photo</button>
+      </div>
+      <div class="modal-actions">
+        <button id="btn-remark-skip" class="btn btn-ghost">Valider sans remarque</button>
+        <button id="btn-remark-save" class="btn btn-primary">Enregistrer</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast" hidden></div>
+
+  <script src="js/data.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
