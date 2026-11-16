@@ -366,3 +366,161 @@ body { padding-bottom: env(safe-area-inset-bottom); }
   box-shadow: 0 4px 12px rgba(0,0,0,.25);
   white-space: nowrap;
 }
+
+/* ---------- Bandeau trimestre ---------- */
+.banner {
+  background: #fef3c7;
+  border: 1px solid #fde68a;
+  border-radius: var(--radius);
+  padding: 14px;
+  margin-bottom: 16px;
+  font-size: .9rem;
+}
+.banner p { margin-bottom: 10px; }
+
+/* ---------- Grille de chambres ---------- */
+.room-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(90px, 1fr));
+  gap: 10px;
+}
+.room-card {
+  background: var(--card);
+  border: 2px solid var(--teal);
+  color: var(--teal-dark);
+  border-radius: var(--radius);
+  padding: 22px 8px;
+  font-size: 1.3rem;
+  font-weight: 700;
+  text-align: center;
+  cursor: pointer;
+  font-family: inherit;
+}
+.room-card:active { background: var(--teal-light); }
+
+.room-chip {
+  display: inline-block;
+  background: var(--teal-light);
+  color: var(--teal-dark);
+  font-weight: 700;
+  font-size: .78rem;
+  border-radius: 8px;
+  padding: 3px 8px;
+}
+.room-chip.warning { background: #fee2e2; color: #991b1b; }
+
+/* ---------- Sélecteurs ---------- */
+select {
+  width: 100%;
+  border: 2px solid var(--border);
+  border-radius: 10px;
+  padding: 12px;
+  font-size: 1rem;
+  font-family: inherit;
+  background: #fff;
+  color: var(--text);
+}
+select:focus { outline: none; border-color: var(--teal); }
+
+.sync-status {
+  font-size: .75rem;
+  color: var(--text-soft);
+  text-align: center;
+  margin-top: 16px;
+}
+
+/* ---------- Récap ---------- */
+.recap-room { margin-bottom: 16px; }
+.recap-room-title {
+  font-weight: 700;
+  color: var(--teal-dark);
+  margin-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 4px;
+}
+
+/* ---------- Historique ---------- */
+.filters {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.filters select { padding: 10px; font-size: .85rem; }
+
+.sort-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.sort-label { font-size: .8rem; color: var(--text-soft); }
+.sort-btn {
+  border: 2px solid var(--border);
+  background: #fff;
+  color: var(--text-soft);
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: .8rem;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+}
+.sort-btn.active {
+  border-color: var(--teal);
+  background: var(--teal);
+  color: #fff;
+}
+
+.remark-row {
+  background: var(--card);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  margin-bottom: 8px;
+  box-shadow: 0 1px 3px rgba(0,0,0,.06);
+}
+.remark-row-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.remark-equip { font-weight: 700; font-size: .92rem; }
+.remark-meta { font-size: .75rem; color: var(--text-soft); margin-left: auto; }
+.remark-text { font-size: .9rem; margin-top: 6px; color: var(--text); }
+.remark-thumb {
+  max-width: 100%;
+  max-height: 120px;
+  border-radius: 8px;
+  margin-top: 8px;
+  display: block;
+}
+
+.freq-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 0;
+}
+.freq-name { width: 110px; font-size: .82rem; flex-shrink: 0; }
+.freq-bar {
+  flex: 1;
+  height: 12px;
+  background: var(--bg);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.freq-bar div {
+  height: 100%;
+  background: var(--teal);
+  border-radius: 6px;
+  min-width: 4px;
+}
+.freq-count {
+  width: 28px;
+  text-align: right;
+  font-weight: 700;
+  font-size: .85rem;
+  color: var(--teal-dark);
+}

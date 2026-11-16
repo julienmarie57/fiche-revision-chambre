@@ -18,39 +18,65 @@
   <section id="screen-home" class="screen active">
     <header class="app-header">
       <h1>Fiche Révision Chambre</h1>
-      <p class="subtitle">Maintenance des équipements</p>
+      <p class="subtitle" id="home-quarter"></p>
     </header>
     <div class="container">
-      <button id="btn-new-fiche" class="btn btn-primary btn-block">
-        <span class="btn-icon">📷</span> Nouvelle fiche
-      </button>
+      <div id="quarter-banner" class="banner" hidden>
+        <p id="banner-text"></p>
+        <button id="btn-banner-recap" class="btn btn-primary btn-block">Voir le récap</button>
+      </div>
 
-      <h2 class="section-title">Fiches en cours</h2>
+      <h2 class="section-title">Inspections à réaliser</h2>
+      <div id="list-a-realiser" class="room-grid"></div>
+
+      <h2 class="section-title">Inspections en cours</h2>
       <div id="list-en-cours" class="fiche-list"></div>
 
-      <h2 class="section-title">Fiches terminées</h2>
-      <div id="list-terminees" class="fiche-list"></div>
+      <h2 class="section-title">Inspections réalisées</h2>
+      <div id="list-realisees" class="fiche-list"></div>
 
       <div class="home-actions">
-        <button id="btn-export" class="btn btn-ghost">Exporter les données</button>
-        <label class="btn btn-ghost" style="margin-top:10px">
+        <button id="btn-recap" class="btn btn-ghost btn-block">Récap trimestriel</button>
+        <button id="btn-history" class="btn btn-ghost btn-block" style="margin-top:10px">Historique &amp; analyses</button>
+        <button id="btn-export" class="btn btn-ghost btn-block" style="margin-top:10px">Exporter les données</button>
+        <label class="btn btn-ghost btn-block" style="margin-top:10px">
           <input type="file" id="input-import" accept="application/json,.json" hidden>
           Importer des données
         </label>
+        <p id="sync-status" class="sync-status"></p>
       </div>
     </div>
   </section>
 
-  <!-- ============ NOUVELLE FICHE ============ -->
+  <!-- ============ NOUVELLE INSPECTION ============ -->
   <section id="screen-new" class="screen">
     <header class="app-header with-back">
       <button class="btn-back" data-target="screen-home" aria-label="Retour">←</button>
-      <h1>Nouvelle fiche</h1>
+      <h1 id="new-title">Chambre —</h1>
     </header>
     <div class="container">
       <div class="card">
-        <h2 class="card-title">1. Photographier le numéro de chambre</h2>
-        <p class="hint">Cadrez le numéro de porte et prenez la photo. Le numéro sera détecté automatiquement.</p>
+        <h2 class="card-title">Informations</h2>
+        <div class="field">
+          <label for="insp-chambre">Chambre</label>
+          <input type="text" id="insp-chambre" readonly>
+        </div>
+        <div class="field">
+          <label for="insp-semaine">Semaine</label>
+          <input type="text" id="insp-semaine" readonly>
+        </div>
+        <div class="field">
+          <label for="insp-date">Date</label>
+          <input type="text" id="insp-date" readonly>
+        </div>
+        <div class="field">
+          <label for="insp-personne">Personne</label>
+          <select id="insp-personne"></select>
+        </div>
+      </div>
+      <div class="card">
+        <h2 class="card-title">Photo de la chambre (optionnel)</h2>
+        <p class="hint">Photo du numéro de porte, pour archive avec le rapport.</p>
         <label class="photo-capture" id="room-photo-zone">
           <input type="file" id="input-room-photo" accept="image/*" capture="environment" hidden>
           <div id="room-photo-placeholder">
@@ -59,29 +85,7 @@
           </div>
           <img id="room-photo-preview" alt="Photo du numéro de chambre" hidden>
         </label>
-        <div id="ocr-status" class="ocr-status" hidden></div>
       </div>
-
-      <div class="card">
-        <h2 class="card-title">2. Vérifier les informations</h2>
-        <div class="field">
-          <label for="fiche-chambre">Chambre</label>
-          <input type="text" id="fiche-chambre" inputmode="numeric" autocomplete="off" placeholder="N° de chambre">
-        </div>
-        <div class="field">
-          <label for="fiche-semaine">Semaine</label>
-          <input type="text" id="fiche-semaine" readonly>
-        </div>
-        <div class="field">
-          <label for="fiche-date">Date</label>
-          <input type="text" id="fiche-date" readonly>
-        </div>
-        <div class="field">
-          <label for="fiche-personne">Personne</label>
-          <input type="text" id="fiche-personne" autocomplete="name" placeholder="Nom du technicien">
-        </div>
-      </div>
-
       <button id="btn-start-checklist" class="btn btn-primary btn-block" disabled>
         Commencer la checklist
       </button>
@@ -103,11 +107,72 @@
     </div>
     <div class="container" id="checklist-container"></div>
     <div class="bottom-bar">
-      <button id="btn-finish" class="btn btn-primary btn-block" disabled>Terminer la fiche</button>
+      <button id="btn-finish" class="btn btn-primary btn-block" disabled>Terminer l'inspection</button>
     </div>
   </section>
 
-  <!-- ============ DÉTAIL FICHE TERMINÉE ============ -->
+  <!-- ============ RÉCAP TRIMESTRIEL ============ -->
+  <section id="screen-recap" class="screen">
+    <header class="app-header with-back">
+      <button class="btn-back" data-target="screen-home" aria-label="Accueil">←</button>
+      <div class="header-info">
+        <h1>Récap trimestriel</h1>
+        <p id="recap-subtitle"></p>
+      </div>
+    </header>
+    <div class="container">
+      <div class="field">
+        <label for="recap-quarter">Trimestre</label>
+        <select id="recap-quarter"></select>
+      </div>
+      <div class="card">
+        <h2 class="card-title">Chambres non inspectées</h2>
+        <div id="recap-non-inspectees"></div>
+      </div>
+      <div class="card">
+        <h2 class="card-title">Remarques par chambre</h2>
+        <div id="recap-remarques"></div>
+      </div>
+      <button id="btn-recap-pdf" class="btn btn-primary btn-block">Éditer le récap PDF</button>
+    </div>
+  </section>
+
+  <!-- ============ HISTORIQUE & ANALYSES ============ -->
+  <section id="screen-history" class="screen">
+    <header class="app-header with-back">
+      <button class="btn-back" data-target="screen-home" aria-label="Accueil">←</button>
+      <div class="header-info">
+        <h1>Historique &amp; analyses</h1>
+      </div>
+    </header>
+    <div class="container">
+      <div class="filters">
+        <select id="hist-quarter"></select>
+        <select id="hist-person"></select>
+        <select id="hist-room"></select>
+      </div>
+
+      <div class="card">
+        <h2 class="card-title">Fréquence des problèmes par équipement</h2>
+        <div id="hist-frequency"></div>
+      </div>
+
+      <h2 class="section-title">Remarques <span id="remarks-count" class="category-count"></span></h2>
+      <div class="sort-row">
+        <span class="sort-label">Trier par :</span>
+        <button class="sort-btn" data-sort="date">Date</button>
+        <button class="sort-btn" data-sort="room">Chambre</button>
+        <button class="sort-btn" data-sort="equip">Équipement</button>
+        <button class="sort-btn" data-sort="person">Personne</button>
+      </div>
+      <div id="remarks-table"></div>
+
+      <h2 class="section-title">Inspections</h2>
+      <div id="hist-inspections"></div>
+    </div>
+  </section>
+
+  <!-- ============ DÉTAIL INSPECTION ============ -->
   <section id="screen-detail" class="screen">
     <header class="app-header with-back">
       <button class="btn-back" data-target="screen-home" aria-label="Accueil">←</button>
@@ -126,7 +191,7 @@
   <div id="modal-report" class="modal-overlay" hidden>
     <div class="modal">
       <h2>Éditer le rapport ?</h2>
-      <p class="modal-subtitle">La fiche sera clôturée. Un rapport PDF sera généré et joint à un e-mail à technique@csfds.be.</p>
+      <p class="modal-subtitle">L'inspection sera clôturée. Un rapport PDF sera généré et joint à un e-mail à technique@csfds.be.</p>
       <div class="modal-actions">
         <button id="btn-report-no" class="btn btn-ghost">Non</button>
         <button id="btn-report-yes" class="btn btn-primary">Oui</button>
@@ -158,6 +223,7 @@
   <div id="toast" class="toast" hidden></div>
 
   <script src="js/data.js"></script>
+  <script src="js/firebase.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>

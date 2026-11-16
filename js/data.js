@@ -66,3 +66,9 @@ const CHECKLIST = [
     ]
   }
 ];
+
+const ROOMS = ["302", "304", "311", "404", "414"];
+
+const TECHNICIANS = ["Julien", "Julien 2"];
+
+const REPORT_EMAIL = "technique@csfds.be";

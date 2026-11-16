@@ -1,15 +1,16 @@
 "use strict";
 
-/* ============ Stockage ============ */
-const STORE_FICHES = "mtn_fiches";
+/* ============ Stockage local ============ */
+const STORE = "mtn_inspections_v2";
 const STORE_PROFIL = "mtn_profil";
+const STORE_QUARTER_SEEN = "mtn_last_quarter_seen";
 
-function loadFiches() {
-  try { return JSON.parse(localStorage.getItem(STORE_FICHES)) || []; }
+function loadInspections() {
+  try { return JSON.parse(localStorage.getItem(STORE)) || []; }
   catch { return []; }
 }
-function saveFiches(list) {
-  localStorage.setItem(STORE_FICHES, JSON.stringify(list));
+function saveInspections(list) {
+  localStorage.setItem(STORE, JSON.stringify(list));
 }
 function loadProfil() {
   try { return JSON.parse(localStorage.getItem(STORE_PROFIL)) || {}; }
@@ -29,6 +30,28 @@ function isoWeek(d) {
   return `S${String(week).padStart(2, "0")} - ${date.getUTCFullYear()}`;
 }
 
+function quarterKey(d) {
+  return `${d.getFullYear()}-T${Math.floor(d.getMonth() / 3) + 1}`;
+}
+
+function quarterLabel(key) {
+  const [year, q] = key.split("-T");
+  const months = { "1": "janv. – mars", "2": "avr. – juin", "3": "juil. – sept.", "4": "oct. – déc." };
+  return `T${q} ${year} (${months[q]})`;
+}
+
+function previousQuarterKey(key) {
+  const [year, q] = key.split("-T").map(Number);
+  return q === 1 ? `${year - 1}-T4` : `${year}-T${q - 1}`;
+}
+
+function allQuarterKeys(inspections) {
+  const keys = new Set(inspections.map(i => i.quarter));
+  let k = quarterKey(new Date());
+  for (let n = 0; n < 8; n++) { keys.add(k); k = previousQuarterKey(k); }
+  return [...keys].sort();
+}
+
 function formatDate(d) {
   return d.toLocaleDateString("fr-FR", { weekday: "long", day: "2-digit", month: "long", year: "numeric" });
 }
@@ -37,17 +60,12 @@ function formatTime(d) {
   return d.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
 }
 
-function uid() {
-  return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+function formatShortDate(ts) {
+  return new Date(ts).toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit", year: "numeric" });
 }
 
-function guessDeviceName() {
-  const ua = navigator.userAgent;
-  const android = ua.match(/Android[^;]*;\s*([^;)]+?)\s*(?:Build|\))/i);
-  if (android && android[1] && !/^\d/.test(android[1])) return android[1].trim();
-  if (/iPhone/i.test(ua)) return "iPhone";
-  if (/iPad/i.test(ua)) return "iPad";
-  return "Appareil inconnu";
+function uid() {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 }
 
 function compressImage(file, maxSize = 1024, quality = 0.75) {
@@ -85,6 +103,11 @@ function esc(s) {
   return div.innerHTML;
 }
 
+function splitDetail(detail) {
+  return detail.split(",").map(s => s.trim()).filter(Boolean)
+    .map(s => s.charAt(0).toUpperCase() + s.slice(1));
+}
+
 /* ============ Navigation ============ */
 function showScreen(id) {
   document.querySelectorAll(".screen").forEach(s => s.classList.remove("active"));
@@ -96,204 +119,232 @@ document.querySelectorAll(".btn-back").forEach(btn => {
   btn.addEventListener("click", () => showScreen(btn.dataset.target));
 });
 
-/* ============ État courant ============ */
-let fiches = loadFiches();
-let currentFicheId = null;
+/* ============ État ============ */
+let inspections = loadInspections();
+let currentId = null;
 let pendingRemarkKey = null;
+let recapQuarter = null;
+let remarksSort = "date";
 
-function getCurrentFiche() {
-  return fiches.find(f => f.id === currentFicheId) || null;
-}
-function persist() {
-  saveFiches(fiches);
-}
-
-/* ============ Accueil ============ */
-function renderHome() {
-  fiches = loadFiches();
-  const enCours = fiches.filter(f => f.status === "en_cours").sort((a, b) => b.createdAt - a.createdAt);
-  const terminees = fiches.filter(f => f.status === "terminee").sort((a, b) => (b.finishedAt || 0) - (a.finishedAt || 0));
-
-  renderFicheList("list-en-cours", enCours, "Aucune fiche en cours.");
-  renderFicheList("list-terminees", terminees, "Aucune fiche terminée.");
+function persist(insp) {
+  saveInspections(inspections);
+  if (Cloud.enabled) {
+    const target = insp || getInspection(currentId);
+    if (target) Cloud.push(target).catch(() => {});
+  }
 }
 
-function itemProgress(fiche) {
+function getInspection(id) {
+  return inspections.find(i => i.id === id) || null;
+}
+
+function inspectionForRoom(room, quarter) {
+  return inspections.find(i => i.room === room && i.quarter === quarter) || null;
+}
+
+function itemProgress(insp) {
   let done = 0, total = 0;
-  CHECKLIST.forEach((cat, ci) => cat.items.forEach((item, ii) => {
-    const st = fiche.items[`${ci}-${ii}`];
+  CHECKLIST.forEach((cat, ci) => cat.items.forEach((_, ii) => {
+    const st = insp.items[`${ci}-${ii}`];
     total++;
     if (st && st.actions.length && st.actions.every(Boolean)) done++;
   }));
   return { done, total };
 }
 
-function renderFicheList(listId, list, emptyMsg) {
-  const el = document.getElementById(listId);
+/* ============ Accueil ============ */
+function renderHome() {
+  inspections = loadInspections();
+  const q = quarterKey(new Date());
+
+  document.getElementById("home-quarter").textContent = quarterLabel(q);
+
+  const enCours = inspections
+    .filter(i => i.quarter === q && i.status === "en_cours")
+    .sort((a, b) => ROOMS.indexOf(a.room) - ROOMS.indexOf(b.room));
+  const realisees = inspections
+    .filter(i => i.quarter === q && i.status === "terminee")
+    .sort((a, b) => (b.finishedAt || 0) - (a.finishedAt || 0));
+  const aRealiser = ROOMS.filter(room => !inspectionForRoom(room, q));
+
+  const grid = document.getElementById("list-a-realiser");
+  grid.innerHTML = "";
+  if (!aRealiser.length) {
+    grid.innerHTML = '<p class="empty-note">Toutes les chambres du trimestre sont inspectées ✓</p>';
+  } else {
+    aRealiser.forEach(room => {
+      const btn = document.createElement("button");
+      btn.className = "room-card";
+      btn.textContent = room;
+      btn.addEventListener("click", () => openNew(room));
+      grid.appendChild(btn);
+    });
+  }
+
+  renderEnCoursList(enCours);
+  renderRealiseesList(realisees);
+  renderQuarterBanner(q);
+  renderSyncStatus();
+}
+
+function renderEnCoursList(list) {
+  const el = document.getElementById("list-en-cours");
   el.innerHTML = "";
   if (!list.length) {
-    el.innerHTML = `<p class="empty-note">${emptyMsg}</p>`;
+    el.innerHTML = '<p class="empty-note">Aucune inspection en cours.</p>';
     return;
   }
-  list.forEach(f => {
-    const { done, total } = itemProgress(f);
+  list.forEach(i => {
+    const { done, total } = itemProgress(i);
     const div = document.createElement("div");
     div.className = "fiche-item";
     div.innerHTML = `
-      <div class="badge ${f.status === "terminee" ? "done" : ""}">${f.status === "terminee" ? "✓" : esc(f.chambre)}</div>
+      <div class="badge">${esc(i.room)}</div>
       <div class="fiche-info">
-        <div class="fiche-room">${esc(f.chambre || "Chambre ?")}</div>
-        <div class="fiche-meta">${esc(f.semaine)} · ${esc(f.date)} · ${esc(f.personne)} · ${done}/${total}</div>
+        <div class="fiche-room">Chambre ${esc(i.room)}</div>
+        <div class="fiche-meta">${esc(i.person)} · ${done}/${total} · commencé le ${formatShortDate(i.startedAt)}</div>
       </div>
       <span class="chevron">›</span>`;
-    div.addEventListener("click", () => {
-      if (f.status === "terminee") openDetail(f.id);
-      else openChecklist(f.id);
-    });
+    div.addEventListener("click", () => openChecklist(i.id));
     el.appendChild(div);
   });
 }
 
-/* ============ Nouvelle fiche ============ */
+function renderRealiseesList(list) {
+  const el = document.getElementById("list-realisees");
+  el.innerHTML = "";
+  if (!list.length) {
+    el.innerHTML = '<p class="empty-note">Aucune inspection terminée ce trimestre.</p>';
+    return;
+  }
+  list.forEach(i => {
+    const div = document.createElement("div");
+    div.className = "fiche-item";
+    div.innerHTML = `
+      <div class="badge done">✓</div>
+      <div class="fiche-info">
+        <div class="fiche-room">Chambre ${esc(i.room)}</div>
+        <div class="fiche-meta">${esc(i.person)} · ${formatShortDate(i.finishedAt)}</div>
+      </div>
+      <span class="chevron">›</span>`;
+    div.addEventListener("click", () => openDetail(i.id));
+    el.appendChild(div);
+  });
+}
+
+function renderQuarterBanner(q) {
+  const banner = document.getElementById("quarter-banner");
+  const seen = localStorage.getItem(STORE_QUARTER_SEEN);
+  const prev = previousQuarterKey(q);
+  const prevHasData = inspections.some(i => i.quarter === prev);
+  if (seen !== q && prevHasData) {
+    document.getElementById("banner-text").textContent =
+      `Nouveau trimestre : ${quarterLabel(q)}. Les chambres repartent en « à réaliser ». Le récap de ${quarterLabel(prev)} est disponible.`;
+    banner.hidden = false;
+  } else {
+    banner.hidden = true;
+  }
+  localStorage.setItem(STORE_QUARTER_SEEN, q);
+}
+
+document.getElementById("btn-banner-recap").addEventListener("click", () => {
+  openRecap(previousQuarterKey(quarterKey(new Date())));
+});
+
+function renderSyncStatus() {
+  const el = document.getElementById("sync-status");
+  el.textContent = Cloud.enabled
+    ? "☁️ Synchronisation Firebase active"
+    : "Mode local (données sur cet appareil uniquement). Config Firebase à renseigner dans js/firebase.js pour la synchronisation.";
+}
+
+/* ============ Nouvelle inspection ============ */
 const inputRoomPhoto = document.getElementById("input-room-photo");
 const roomPreview = document.getElementById("room-photo-preview");
 const roomPlaceholder = document.getElementById("room-photo-placeholder");
-const ocrStatus = document.getElementById("ocr-status");
-let roomPhotoData = null;
+let newRoomPhoto = null;
+let newRoom = null;
 
-document.getElementById("btn-new-fiche").addEventListener("click", () => {
-  roomPhotoData = null;
+function openNew(room) {
+  newRoom = room;
+  newRoomPhoto = null;
   roomPreview.hidden = true;
   roomPreview.removeAttribute("src");
   roomPlaceholder.style.display = "";
-  ocrStatus.hidden = true;
-  document.getElementById("fiche-chambre").value = "";
+  document.getElementById("new-title").textContent = `Chambre ${room}`;
+  document.getElementById("insp-chambre").value = room;
   const now = new Date();
-  document.getElementById("fiche-semaine").value = isoWeek(now);
-  document.getElementById("fiche-date").value = `${formatDate(now)} ${formatTime(now)}`;
-  const profil = loadProfil();
-  document.getElementById("fiche-personne").value = profil.personne || guessDeviceName();
-  checkStartReady();
+  document.getElementById("insp-semaine").value = isoWeek(now);
+  document.getElementById("insp-date").value = `${formatDate(now)} ${formatTime(now)}`;
+  const select = document.getElementById("insp-personne");
+  select.innerHTML = TECHNICIANS.map(t => `<option value="${esc(t)}">${esc(t)}</option>`).join("");
+  select.value = loadProfil().personne || TECHNICIANS[0];
+  document.getElementById("btn-start-checklist").disabled = false;
   showScreen("screen-new");
-});
+}
 
 inputRoomPhoto.addEventListener("change", async () => {
   const file = inputRoomPhoto.files[0];
   if (!file) return;
-  ocrStatus.hidden = true;
   try {
-    roomPhotoData = await compressImage(file, 1024, 0.7);
+    newRoomPhoto = await compressImage(file, 1024, 0.7);
+    roomPreview.src = newRoomPhoto;
+    roomPreview.hidden = false;
+    roomPlaceholder.style.display = "none";
   } catch {
     showToast("Photo illisible");
-    return;
   }
-  roomPreview.src = roomPhotoData;
-  roomPreview.hidden = false;
-  roomPlaceholder.style.display = "none";
-  await runOcr();
   inputRoomPhoto.value = "";
 });
 
-async function loadTesseract() {
-  if (window.Tesseract) return window.Tesseract;
-  await new Promise((resolve, reject) => {
-    const s = document.createElement("script");
-    s.src = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
-    s.onload = resolve;
-    s.onerror = () => reject(new Error("CDN indisponible"));
-    document.head.appendChild(s);
-  });
-  return window.Tesseract;
-}
-
-function setOcrStatus(msg, isError = false, spinner = false) {
-  ocrStatus.hidden = false;
-  ocrStatus.classList.toggle("error", isError);
-  ocrStatus.textContent = (spinner ? "⏳ " : isError ? "⚠️ " : "✅ ") + msg;
-}
-
-async function runOcr() {
-  setOcrStatus("Lecture du numéro de chambre…", false, true);
-  try {
-    const Tesseract = await loadTesseract();
-    const worker = await Tesseract.createWorker("eng");
-    await worker.setParameters({
-      tessedit_char_whitelist: "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcedfghijklmnopqrstuvwxyz-",
-      tessedit_pageseg_mode: "7"
-    });
-    const { data } = await worker.recognize(roomPhotoData);
-    await worker.terminate();
-    const candidates = (data.text || "").toUpperCase().match(/(?:[A-Z-]*\d[A-Z0-9-]*)/g) || [];
-    candidates.sort((a, b) => b.length - a.length);
-    if (candidates.length) {
-      const num = candidates[0].replace(/[^A-Z0-9-]/g, "");
-      document.getElementById("fiche-chambre").value = num;
-      setOcrStatus(`Numéro détecté : ${num}. Vérifiez et corrigez si besoin.`);
-    } else {
-      setOcrStatus("Numéro non détecté. Saisissez-le manuellement ci-dessous.", true);
-    }
-  } catch {
-    setOcrStatus("Détection indisponible (hors-ligne ?). Saisissez le numéro manuellement.", true);
-  }
-  checkStartReady();
-}
-
-document.getElementById("fiche-chambre").addEventListener("input", checkStartReady);
-document.getElementById("fiche-personne").addEventListener("input", checkStartReady);
-
-function checkStartReady() {
-  const chambre = document.getElementById("fiche-chambre").value.trim();
-  const personne = document.getElementById("fiche-personne").value.trim();
-  document.getElementById("btn-start-checklist").disabled = !(chambre && personne);
-}
-
 document.getElementById("btn-start-checklist").addEventListener("click", () => {
-  const chambre = document.getElementById("fiche-chambre").value.trim();
-  const personne = document.getElementById("fiche-personne").value.trim();
-  saveProfil({ personne });
-
+  const person = document.getElementById("insp-personne").value;
+  saveProfil({ personne: person });
   const now = new Date();
-  const fiche = {
-    id: uid(),
-    createdAt: now.getTime(),
-    semaine: isoWeek(now),
-    date: `${formatDate(now)} ${formatTime(now)}`,
-    chambre,
-    personne,
-    roomPhoto: roomPhotoData,
+  const insp = {
+    id: `${newRoom}_${quarterKey(now)}`,
+    room: newRoom,
+    quarter: quarterKey(now),
     status: "en_cours",
+    person,
+    startedAt: now.getTime(),
     finishedAt: null,
-    items: {}
+    date: `${formatDate(now)} ${formatTime(now)}`,
+    roomPhoto: newRoomPhoto,
+    items: {},
+    updatedAt: now.getTime()
   };
-  fiches.push(fiche);
-  persist();
-  currentFicheId = fiche.id;
-  openChecklist(fiche.id);
+  const existing = inspections.findIndex(i => i.id === insp.id);
+  if (existing >= 0) inspections[existing] = insp;
+  else inspections.push(insp);
+  persist(insp);
+  currentId = insp.id;
+  openChecklist(insp.id);
 });
 
 /* ============ Checklist ============ */
 function itemKey(ci, ii) { return `${ci}-${ii}`; }
 
-function getItemState(fiche, ci, ii, detail) {
+function getItemState(insp, ci, ii, detail) {
   const key = itemKey(ci, ii);
-  if (!fiche.items[key]) {
-    fiche.items[key] = { actions: new Array(detail.length).fill(false), remark: null };
+  if (!insp.items[key]) {
+    insp.items[key] = { actions: new Array(detail.length).fill(false), remark: null };
   }
-  return fiche.items[key];
+  return insp.items[key];
 }
 
-function openChecklist(ficheId) {
-  currentFicheId = ficheId;
-  const fiche = getCurrentFiche();
-  if (!fiche) { showScreen("screen-home"); return; }
-  document.getElementById("cl-title").textContent = `Chambre ${fiche.chambre}`;
-  document.getElementById("cl-meta").textContent = `${fiche.semaine} · ${fiche.date} · ${fiche.personne}`;
+function openChecklist(id) {
+  currentId = id;
+  const insp = getInspection(id);
+  if (!insp) { showScreen("screen-home"); return; }
+  document.getElementById("cl-title").textContent = `Chambre ${insp.room}`;
+  document.getElementById("cl-meta").textContent = `${insp.quarter} · ${insp.date} · ${insp.person}`;
   renderChecklist();
   showScreen("screen-checklist");
 }
 
 function renderChecklist() {
-  const fiche = getCurrentFiche();
+  const insp = getInspection(currentId);
   const container = document.getElementById("checklist-container");
   container.innerHTML = "";
 
@@ -301,7 +352,7 @@ function renderChecklist() {
     const catDiv = document.createElement("div");
     catDiv.className = "category";
     const catDone = cat.items.filter((_, ii) => {
-      const st = fiche.items[itemKey(ci, ii)];
+      const st = insp.items[itemKey(ci, ii)];
       return st && st.actions.every(Boolean);
     }).length;
     catDiv.innerHTML = `
@@ -312,13 +363,12 @@ function renderChecklist() {
 
     cat.items.forEach((item, ii) => {
       const detail = splitDetail(item.detail);
-      const st = getItemState(fiche, ci, ii, detail);
+      const st = getItemState(insp, ci, ii, detail);
       const allChecked = st.actions.every(Boolean);
       const someChecked = st.actions.some(Boolean);
 
       const equip = document.createElement("div");
       equip.className = "equip" + (allChecked ? " done" : someChecked ? " partial" : "");
-      equip.dataset.key = itemKey(ci, ii);
 
       const head = document.createElement("button");
       head.className = "equip-head";
@@ -345,9 +395,9 @@ function renderChecklist() {
         row.querySelector("input").addEventListener("change", (e) => {
           st.actions[ai] = e.target.checked;
           row.classList.toggle("checked", e.target.checked);
-          updateEquipVisual(equip, fiche, ci, ii, detail);
+          updateEquipVisual(equip, insp, ci, ii, detail);
           updateProgress();
-          persist();
+          touch();
           if (st.actions.every(Boolean)) openRemarkModal(itemKey(ci, ii), item.name);
         });
         body.appendChild(row);
@@ -360,19 +410,15 @@ function renderChecklist() {
       btnAll.type = "button";
       btnAll.textContent = allChecked ? "Revoir les étapes" : "Tout valider";
       btnAll.addEventListener("click", () => {
-        const wasDone = st.actions.every(Boolean);
-        if (wasDone) {
-          equip.classList.add("open");
-          return;
-        }
+        if (st.actions.every(Boolean)) { equip.classList.add("open"); return; }
         st.actions = st.actions.map(() => true);
         body.querySelectorAll("input[type=checkbox]").forEach(cb => {
           cb.checked = true;
           cb.closest(".action-row").classList.add("checked");
         });
-        updateEquipVisual(equip, fiche, ci, ii, detail);
+        updateEquipVisual(equip, insp, ci, ii, detail);
         updateProgress();
-        persist();
+        touch();
         openRemarkModal(itemKey(ci, ii), item.name);
       });
       actions.appendChild(btnAll);
@@ -395,13 +441,8 @@ function renderChecklist() {
   updateProgress();
 }
 
-function splitDetail(detail) {
-  return detail.split(",").map(s => s.trim()).filter(Boolean)
-    .map(s => s.charAt(0).toUpperCase() + s.slice(1));
-}
-
-function updateEquipVisual(equip, fiche, ci, ii, detail) {
-  const st = getItemState(fiche, ci, ii, detail);
+function updateEquipVisual(equip, insp, ci, ii, detail) {
+  const st = getItemState(insp, ci, ii, detail);
   const allChecked = st.actions.every(Boolean);
   const someChecked = st.actions.some(Boolean);
   equip.classList.toggle("done", allChecked);
@@ -410,19 +451,27 @@ function updateEquipVisual(equip, fiche, ci, ii, detail) {
   const catDiv = equip.closest(".category");
   const items = CHECKLIST[ci].items;
   const catDone = items.filter((_, j) => {
-    const s = fiche.items[itemKey(ci, j)];
+    const s = insp.items[itemKey(ci, j)];
     return s && s.actions.every(Boolean);
   }).length;
   catDiv.querySelector(".category-count").textContent = `${catDone}/${items.length}`;
 }
 
 function updateProgress() {
-  const fiche = getCurrentFiche();
-  if (!fiche) return;
-  const { done, total } = itemProgress(fiche);
+  const insp = getInspection(currentId);
+  if (!insp) return;
+  const { done, total } = itemProgress(insp);
   document.getElementById("progress-fill").style.width = total ? `${(done / total) * 100}%` : "0";
   document.getElementById("progress-label").textContent = `${done} / ${total}`;
   document.getElementById("btn-finish").disabled = done !== total;
+}
+
+function touch() {
+  const insp = getInspection(currentId);
+  if (insp) {
+    insp.updatedAt = Date.now();
+    persist(insp);
+  }
 }
 
 /* ============ Pop-up remarque ============ */
@@ -435,8 +484,8 @@ let remarkPhotoData = null;
 
 function openRemarkModal(key, itemName) {
   pendingRemarkKey = key;
-  const fiche = getCurrentFiche();
-  const st = fiche.items[key];
+  const insp = getInspection(currentId);
+  const st = insp.items[key];
   remarkText.value = st.remark?.text || "";
   remarkPhotoData = st.remark?.photo || null;
   remarkPhotoPreview.src = remarkPhotoData || "";
@@ -474,9 +523,8 @@ document.getElementById("btn-remove-remark-photo").addEventListener("click", () 
 
 document.getElementById("btn-remark-skip").addEventListener("click", () => {
   if (!pendingRemarkKey) return;
-  const fiche = getCurrentFiche();
-  fiche.items[pendingRemarkKey].remark = null;
-  persist();
+  getInspection(currentId).items[pendingRemarkKey].remark = null;
+  touch();
   closeRemarkModal();
   renderChecklist();
 });
@@ -488,15 +536,14 @@ document.getElementById("btn-remark-save").addEventListener("click", () => {
     showToast("Remarque vide : texte ou photo requis");
     return;
   }
-  const fiche = getCurrentFiche();
-  fiche.items[pendingRemarkKey].remark = { text, photo: remarkPhotoData };
-  persist();
+  getInspection(currentId).items[pendingRemarkKey].remark = { text, photo: remarkPhotoData };
+  touch();
   closeRemarkModal();
   renderChecklist();
   showToast("Remarque enregistrée");
 });
 
-/* ============ Chargement jsPDF ============ */
+/* ============ Rapport PDF ============ */
 async function loadJsPDF() {
   if (window.jspdf) return window.jspdf.jsPDF;
   await new Promise((resolve, reject) => {
@@ -518,15 +565,15 @@ function getImageSize(dataURL) {
   });
 }
 
-function reportFileName(fiche) {
-  const d = new Date(fiche.createdAt);
+function reportFileName(insp) {
+  const d = new Date(insp.finishedAt || insp.startedAt);
   const ymd = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`;
-  const room = (fiche.chambre || "XXX").toUpperCase().replace(/[^A-Z0-9]/g, "") || "XXX";
-  const person = (fiche.personne || "").replace(/[^A-Za-z0-9]/g, "");
+  const room = (insp.room || "XXX").toUpperCase().replace(/[^A-Z0-9]/g, "") || "XXX";
+  const person = (insp.person || "").replace(/[^A-Za-z0-9]/g, "");
   return `${ymd}_RAP_INSPCH${room}_${person}.pdf`;
 }
 
-async function buildReportPdf(fiche) {
+async function buildReportPdf(insp) {
   const JsPDF = await loadJsPDF();
   const doc = new JsPDF({ unit: "mm", format: "a4" });
   const M = 15;
@@ -535,16 +582,12 @@ async function buildReportPdf(fiche) {
   let y = 0;
 
   const ensureSpace = (h) => {
-    if (y + h > MAX_Y) {
-      doc.addPage();
-      y = M;
-    }
+    if (y + h > MAX_Y) { doc.addPage(); y = M; }
   };
 
   doc.setFont("helvetica", "bold");
   doc.setFontSize(16);
   doc.text("FICHE REVISION CHAMBRE", 105, 20, { align: "center" });
-
   doc.setDrawColor(15, 118, 110);
   doc.setLineWidth(0.8);
   doc.line(M, 25, 210 - M, 25);
@@ -552,16 +595,14 @@ async function buildReportPdf(fiche) {
   doc.setFontSize(10);
   doc.setFont("helvetica", "normal");
   const info = [
-    `Semaine : ${fiche.semaine}`,
-    `Date : ${fiche.date}`,
-    `Chambre : ${fiche.chambre}`,
-    `Personne : ${fiche.personne}`
+    `Trimestre : ${insp.quarter}`,
+    `Date : ${insp.date}`,
+    `Chambre : ${insp.room}`,
+    `Personne : ${insp.person}`
   ];
   y = 34;
   info.forEach((line, i) => {
-    const col = i % 2;
-    const row = Math.floor(i / 2);
-    doc.text(line, M + col * (W / 2), y + row * 6);
+    doc.text(line, M + (i % 2) * (W / 2), y + Math.floor(i / 2) * 6);
   });
   y += 16;
 
@@ -579,14 +620,13 @@ async function buildReportPdf(fiche) {
     y += 6;
 
     for (const [ii, item] of cat.items.entries()) {
-      const st = fiche.items[itemKey(ci, ii)];
+      const st = insp.items[itemKey(ci, ii)];
       const detail = splitDetail(item.detail);
       const done = st && st.actions.every(Boolean);
 
       doc.setFont("helvetica", "bold");
       doc.setFontSize(10);
-      const mark = done ? "[X]" : "[ ]";
-      doc.text(`${mark} ${item.name}`, M, y);
+      doc.text(`${done ? "[X]" : "[ ]"} ${item.name}`, M, y);
       y += 5;
 
       if (st) {
@@ -641,7 +681,6 @@ async function buildReportPdf(fiche) {
         }
         doc.setTextColor(0, 0, 0);
       }
-
       y += 3;
     }
     y += 4;
@@ -650,80 +689,80 @@ async function buildReportPdf(fiche) {
   return doc;
 }
 
-async function sendReportEmail(fiche, fileName) {
-  const subject = reportFileName(fiche).replace(/\.pdf$/, "");
+async function sendReportEmail(insp, fileName) {
+  const subject = reportFileName(insp).replace(/\.pdf$/, "");
   const body = [
     "Bonjour,",
     "",
-    `Veuillez trouver ci-joint le rapport d'inspection de la chambre ${fiche.chambre}.`,
+    `Veuillez trouver ci-joint le rapport d'inspection de la chambre ${insp.room}.`,
     `Fichier : ${fileName}`,
     "",
     "Cordialement,",
-    fiche.personne
+    insp.person
   ].join("\n");
   window.location.href =
-    `mailto:technique@csfds.be?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+    `mailto:${REPORT_EMAIL}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
 }
 
-async function generateReport(fiche, withEmail) {
+async function generateReport(insp, withEmail) {
   showToast("Génération du rapport…");
   try {
-    const doc = await buildReportPdf(fiche);
-    const fileName = reportFileName(fiche);
+    const doc = await buildReportPdf(insp);
+    const fileName = reportFileName(insp);
     doc.save(fileName);
-    if (withEmail) await sendReportEmail(fiche, fileName);
+    if (withEmail) await sendReportEmail(insp, fileName);
     showToast("Rapport généré ✓");
   } catch {
     showToast("Erreur : rapport indisponible (hors-ligne ?)");
   }
 }
 
-/* ============ Terminer la fiche ============ */
+/* ============ Clôture ============ */
 const modalReport = document.getElementById("modal-report");
 
 document.getElementById("btn-finish").addEventListener("click", () => {
-  const fiche = getCurrentFiche();
-  if (!fiche) return;
+  if (!getInspection(currentId)) return;
   modalReport.hidden = false;
 });
 
 document.getElementById("btn-report-no").addEventListener("click", () => {
   modalReport.hidden = true;
-  closeFiche(null);
+  closeInspection(null);
 });
 
-document.getElementById("btn-report-yes").addEventListener("click", async () => {
+document.getElementById("btn-report-yes").addEventListener("click", () => {
   modalReport.hidden = true;
-  const fiche = getCurrentFiche();
-  closeFiche(fiche);
+  const insp = getInspection(currentId);
+  closeInspection(insp);
 });
 
-function closeFiche(ficheForReport) {
-  const fiche = getCurrentFiche();
-  if (!fiche) return;
-  fiche.status = "terminee";
-  fiche.finishedAt = Date.now();
-  persist();
-  currentFicheId = null;
+function closeInspection(inspForReport) {
+  const insp = getInspection(currentId);
+  if (!insp) return;
+  insp.status = "terminee";
+  insp.finishedAt = Date.now();
+  insp.updatedAt = Date.now();
+  persist(insp);
+  currentId = null;
   renderHome();
   showScreen("screen-home");
-  showToast("Fiche terminée ✓");
-  if (ficheForReport) generateReport(ficheForReport, true);
+  showToast(`Chambre ${insp.room} inspectée ✓`);
+  if (inspForReport) generateReport(inspForReport, true);
 }
 
-/* ============ Détail fiche terminée ============ */
-function openDetail(ficheId) {
-  const fiche = fiches.find(f => f.id === ficheId);
-  if (!fiche) return;
-  document.getElementById("detail-title").textContent = `Chambre ${fiche.chambre}`;
+/* ============ Détail inspection ============ */
+function openDetail(id) {
+  const insp = inspections.find(i => i.id === id);
+  if (!insp) return;
+  document.getElementById("detail-title").textContent = `Chambre ${insp.room}`;
   document.getElementById("detail-meta").textContent =
-    `${fiche.semaine} · ${fiche.date} · ${fiche.personne}`;
+    `${insp.quarter} · ${insp.date} · ${insp.person}`;
   const container = document.getElementById("detail-container");
   container.innerHTML = "";
 
-  if (fiche.roomPhoto) {
+  if (insp.roomPhoto) {
     const img = document.createElement("img");
-    img.src = fiche.roomPhoto;
+    img.src = insp.roomPhoto;
     img.alt = "Photo du numéro de chambre";
     img.style.cssText = "width:100%;border-radius:14px;margin-bottom:16px;";
     container.appendChild(img);
@@ -734,12 +773,12 @@ function openDetail(ficheId) {
     catDiv.className = "category";
     catDiv.innerHTML = `<div class="category-title"><span>${esc(cat.category)}</span></div>`;
     cat.items.forEach((item, ii) => {
-      const st = fiche.items[itemKey(ci, ii)];
+      const st = insp.items[itemKey(ci, ii)];
       const done = st && st.actions.every(Boolean);
       const equip = document.createElement("div");
       equip.className = "equip" + (done ? " done" : "");
       const detailTxt = st
-        ? st.actions.map((a, i) => a ? `✓ ${esc(splitDetail(item.detail)[i])}` : `○ ${esc(splitDetail(item.detail)[i])}`).join(" · ")
+        ? st.actions.map((a, i) => `${a ? "✓" : "○"} ${esc(splitDetail(item.detail)[i])}`).join(" · ")
         : "Non contrôlé";
       equip.innerHTML = `
         <div class="equip-head" style="cursor:default">
@@ -760,22 +799,307 @@ function openDetail(ficheId) {
     container.appendChild(catDiv);
   });
 
-  document.getElementById("btn-detail-report").onclick = () => generateReport(fiche, false);
+  document.getElementById("btn-detail-report").onclick = () => generateReport(insp, false);
   showScreen("screen-detail");
 }
 
-/* ============ Export ============ */
+/* ============ Récap trimestriel ============ */
+function openRecap(quarter) {
+  recapQuarter = quarter || previousQuarterKey(quarterKey(new Date()));
+  const select = document.getElementById("recap-quarter");
+  select.innerHTML = allQuarterKeys(inspections)
+    .map(k => `<option value="${k}">${quarterLabel(k)}</option>`).join("");
+  select.value = recapQuarter;
+  select.onchange = () => { recapQuarter = select.value; renderRecap(); };
+  renderRecap();
+  showScreen("screen-recap");
+}
+
+document.getElementById("btn-recap").addEventListener("click", () => {
+  openRecap(previousQuarterKey(quarterKey(new Date())));
+});
+
+function renderRecap() {
+  const q = recapQuarter;
+  document.getElementById("recap-subtitle").textContent = quarterLabel(q);
+  const inspectedRooms = inspections
+    .filter(i => i.quarter === q && i.status === "terminee")
+    .map(i => i.room);
+  const nonInspectees = ROOMS.filter(r => !inspectedRooms.includes(r));
+
+  const ni = document.getElementById("recap-non-inspectees");
+  ni.innerHTML = nonInspectees.length
+    ? nonInspectees.map(r => `<span class="room-chip warning">${esc(r)}</span>`).join("")
+    : '<p class="empty-note">Toutes les chambres ont été inspectées ✓</p>';
+
+  const rem = document.getElementById("recap-remarques");
+  rem.innerHTML = "";
+  const quarterInspections = inspections
+    .filter(i => i.quarter === q && i.status === "terminee")
+    .sort((a, b) => ROOMS.indexOf(a.room) - ROOMS.indexOf(b.room));
+  let total = 0;
+  quarterInspections.forEach(insp => {
+    const remarks = collectRemarks(insp);
+    if (!remarks.length) return;
+    total += remarks.length;
+    const block = document.createElement("div");
+    block.className = "recap-room";
+    block.innerHTML = `<div class="recap-room-title">Chambre ${esc(insp.room)} — ${esc(insp.person)}</div>`;
+    remarks.forEach(r => {
+      const div = document.createElement("div");
+      div.className = "remark-block";
+      div.innerHTML = `
+        <div class="remark-label">${esc(r.category)} · ${esc(r.equipment)}</div>
+        ${esc(r.text || "")}
+        ${r.photo ? `<img src="${r.photo}" alt="Photo remarque">` : ""}`;
+      block.appendChild(div);
+    });
+    rem.appendChild(block);
+  });
+  if (!total) {
+    rem.innerHTML = '<p class="empty-note">Aucune remarque ce trimestre.</p>';
+  }
+}
+
+async function generateRecapPdf() {
+  const q = recapQuarter;
+  showToast("Génération du récap…");
+  try {
+    const JsPDF = await loadJsPDF();
+    const doc = new JsPDF({ unit: "mm", format: "a4" });
+    const M = 15;
+    const MAX_Y = 280;
+    let y = 0;
+    const ensureSpace = (h) => { if (y + h > MAX_Y) { doc.addPage(); y = M; } };
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(16);
+    doc.text("RECAP TRIMESTRIEL - REVISION CHAMBRES", 105, 20, { align: "center" });
+    doc.setFontSize(11);
+    doc.text(quarterLabel(q), 105, 27, { align: "center" });
+    doc.setDrawColor(15, 118, 110);
+    doc.setLineWidth(0.8);
+    doc.line(M, 31, 210 - M, 31);
+    y = 40;
+
+    const inspectedRooms = inspections
+      .filter(i => i.quarter === q && i.status === "terminee").map(i => i.room);
+    const nonInspectees = ROOMS.filter(r => !inspectedRooms.includes(r));
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(12);
+    doc.text("Chambres non inspectées", M, y);
+    y += 7;
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(10);
+    if (nonInspectees.length) {
+      doc.text(nonInspectees.join("   "), M, y);
+      y += 8;
+    } else {
+      doc.text("Aucune - toutes les chambres ont été inspectées.", M, y);
+      y += 8;
+    }
+    y += 4;
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(12);
+    doc.text("Remarques par chambre", M, y);
+    y += 8;
+
+    const quarterInspections = inspections
+      .filter(i => i.quarter === q && i.status === "terminee")
+      .sort((a, b) => ROOMS.indexOf(a.room) - ROOMS.indexOf(b.room));
+    let any = false;
+
+    for (const insp of quarterInspections) {
+      const remarks = collectRemarks(insp);
+      if (!remarks.length) continue;
+      any = true;
+      ensureSpace(10);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(11);
+      doc.text(`Chambre ${insp.room} — ${insp.person}`, M, y);
+      y += 6;
+
+      for (const r of remarks) {
+        ensureSpace(12);
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(9);
+        doc.text(`${r.category} / ${r.equipment}`, M + 4, y);
+        y += 5;
+        doc.setFont("helvetica", "normal");
+        if (r.text) {
+          const lines = doc.splitTextToSize(r.text, 210 - 2 * M - 8);
+          ensureSpace(lines.length * 4.5);
+          doc.text(lines, M + 8, y);
+          y += lines.length * 4.5;
+        }
+        if (r.photo) {
+          try {
+            const dim = await getImageSize(r.photo);
+            const ph = Math.min(60, 50 * dim.h / dim.w);
+            const pw = Math.min(50, ph * dim.w / dim.h);
+            ensureSpace(ph + 4);
+            doc.addImage(r.photo, "JPEG", M + 8, y, pw, ph);
+            y += ph + 4;
+          } catch {}
+        }
+        y += 2;
+      }
+      y += 4;
+    }
+    if (!any) {
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(10);
+      doc.text("Aucune remarque ce trimestre.", M, y);
+    }
+
+    const d = new Date();
+    const ymd = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`;
+    doc.save(`${ymd}_REC_TRIM_${q.replace("-T", "T")}.pdf`);
+    showToast("Récap généré ✓");
+  } catch {
+    showToast("Erreur : récap indisponible (hors-ligne ?)");
+  }
+}
+
+document.getElementById("btn-recap-pdf").addEventListener("click", generateRecapPdf);
+
+/* ============ Historique & analyses ============ */
+function collectRemarks(insp) {
+  const out = [];
+  CHECKLIST.forEach((cat, ci) => cat.items.forEach((item, ii) => {
+    const st = insp.items[itemKey(ci, ii)];
+    if (st?.remark && (st.remark.text || st.remark.photo)) {
+      out.push({
+        room: insp.room,
+        quarter: insp.quarter,
+        person: insp.person,
+        date: insp.finishedAt || insp.startedAt,
+        category: cat.category,
+        equipment: item.name,
+        text: st.remark.text || "",
+        photo: st.remark.photo || null
+      });
+    }
+  }));
+  return out;
+}
+
+function openHistory() {
+  const quarters = allQuarterKeys(inspections);
+  const selQ = document.getElementById("hist-quarter");
+  selQ.innerHTML = `<option value="">Tous les trimestres</option>` +
+    quarters.map(k => `<option value="${k}">${quarterLabel(k)}</option>`).join("");
+  const selP = document.getElementById("hist-person");
+  selP.innerHTML = `<option value="">Toutes les personnes</option>` +
+    TECHNICIANS.map(t => `<option value="${esc(t)}">${esc(t)}</option>`).join("");
+  const selR = document.getElementById("hist-room");
+  selR.innerHTML = `<option value="">Toutes les chambres</option>` +
+    ROOMS.map(r => `<option value="${esc(r)}">${esc(r)}</option>`).join("");
+  [selQ, selP, selR].forEach(sel => sel.onchange = renderHistory);
+  document.querySelectorAll(".sort-btn").forEach(btn => {
+    btn.onclick = () => { remarksSort = btn.dataset.sort; renderHistory(); };
+  });
+  renderHistory();
+  showScreen("screen-history");
+}
+
+document.getElementById("btn-history").addEventListener("click", openHistory);
+
+function filteredInspections() {
+  const q = document.getElementById("hist-quarter").value;
+  const p = document.getElementById("hist-person").value;
+  const r = document.getElementById("hist-room").value;
+  return inspections.filter(i =>
+    i.status === "terminee" &&
+    (!q || i.quarter === q) &&
+    (!p || i.person === p) &&
+    (!r || i.room === r)
+  );
+}
+
+function renderHistory() {
+  const list = filteredInspections();
+  document.querySelectorAll(".sort-btn").forEach(btn =>
+    btn.classList.toggle("active", btn.dataset.sort === remarksSort));
+
+  const remarks = list.flatMap(collectRemarks);
+  const order = {
+    date: (a, b) => b.date - a.date,
+    room: (a, b) => a.room.localeCompare(b.room) || b.date - a.date,
+    equip: (a, b) => a.equipment.localeCompare(b.equipment),
+    person: (a, b) => a.person.localeCompare(b.person) || b.date - a.date
+  };
+  remarks.sort(order[remarksSort] || order.date);
+
+  document.getElementById("remarks-count").textContent = `(${remarks.length})`;
+  const table = document.getElementById("remarks-table");
+  table.innerHTML = "";
+  if (!remarks.length) {
+    table.innerHTML = '<p class="empty-note">Aucune remarque pour ces filtres.</p>';
+  } else {
+    remarks.forEach(r => {
+      const div = document.createElement("div");
+      div.className = "remark-row";
+      div.innerHTML = `
+        <div class="remark-row-head">
+          <span class="room-chip">${esc(r.room)}</span>
+          <span class="remark-equip">${esc(r.equipment)}</span>
+          <span class="remark-meta">${esc(r.person)} · ${formatShortDate(r.date)}</span>
+        </div>
+        ${r.text ? `<div class="remark-text">${esc(r.text)}</div>` : ""}
+        ${r.photo ? `<img class="remark-thumb" src="${r.photo}" alt="Photo">` : ""}`;
+      table.appendChild(div);
+    });
+  }
+
+  const freq = {};
+  remarks.forEach(r => { freq[r.equipment] = (freq[r.equipment] || 0) + 1; });
+  const freqList = Object.entries(freq).sort((a, b) => b[1] - a[1]);
+  const freqEl = document.getElementById("hist-frequency");
+  freqEl.innerHTML = freqList.length
+    ? freqList.map(([eq, n]) => {
+        const max = freqList[0][1];
+        return `<div class="freq-row">
+          <span class="freq-name">${esc(eq)}</span>
+          <div class="freq-bar"><div style="width:${(n / max) * 100}%"></div></div>
+          <span class="freq-count">${n}</span>
+        </div>`;
+      }).join("")
+    : '<p class="empty-note">Aucune donnée.</p>';
+
+  const inspEl = document.getElementById("hist-inspections");
+  inspEl.innerHTML = "";
+  if (!list.length) {
+    inspEl.innerHTML = '<p class="empty-note">Aucune inspection pour ces filtres.</p>';
+  } else {
+    list.sort((a, b) => (b.finishedAt || 0) - (a.finishedAt || 0)).forEach(i => {
+      const div = document.createElement("div");
+      div.className = "fiche-item";
+      div.innerHTML = `
+        <div class="badge done">✓</div>
+        <div class="fiche-info">
+          <div class="fiche-room">Chambre ${esc(i.room)}</div>
+          <div class="fiche-meta">${esc(i.quarter)} · ${esc(i.person)} · ${formatShortDate(i.finishedAt)}</div>
+        </div>
+        <span class="chevron">›</span>`;
+      div.addEventListener("click", () => openDetail(i.id));
+      inspEl.appendChild(div);
+    });
+  }
+}
+
+/* ============ Export / Import ============ */
 document.getElementById("btn-export").addEventListener("click", () => {
-  const data = JSON.stringify(fiches, null, 2);
-  const blob = new Blob([data], { type: "application/json" });
+  const blob = new Blob([JSON.stringify(inspections, null, 2)], { type: "application/json" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
-  a.download = `fiches-revision-${new Date().toISOString().slice(0, 10)}.json`;
+  a.download = `inspections-${new Date().toISOString().slice(0, 10)}.json`;
   a.click();
   URL.revokeObjectURL(a.href);
 });
 
-/* ============ Import ============ */
 document.getElementById("input-import").addEventListener("change", (e) => {
   const file = e.target.files[0];
   if (!file) return;
@@ -786,14 +1110,21 @@ document.getElementById("input-import").addEventListener("change", (e) => {
       if (!Array.isArray(imported)) throw new Error("format");
       let added = 0, skipped = 0;
       imported.forEach(f => {
-        if (!f || !f.id || !Array.isArray(CHECKLIST)) return;
-        if (fiches.some(existing => existing.id === f.id)) { skipped++; return; }
-        fiches.push(f);
+        if (!f || !f.id) return;
+        const existing = inspections.find(i => i.id === f.id);
+        if (existing) {
+          if ((f.updatedAt || 0) > (existing.updatedAt || 0)) {
+            Object.assign(existing, f);
+            added++;
+          } else skipped++;
+          return;
+        }
+        inspections.push(f);
         added++;
       });
       persist();
       renderHome();
-      showToast(`${added} fiche(s) importée(s)${skipped ? `, ${skipped} déjà présente(s)` : ""}`);
+      showToast(`${added} inspection(s) mise(s) à jour`);
     } catch {
       showToast("Fichier invalide");
     }
@@ -802,8 +1133,46 @@ document.getElementById("input-import").addEventListener("change", (e) => {
   e.target.value = "";
 });
 
+/* ============ Synchronisation Firebase ============ */
+async function syncCloud() {
+  if (!Cloud.enabled) return;
+  try {
+    const remote = await Cloud.pull();
+    let changed = false;
+    remote.forEach(rIns => {
+      const local = inspections.find(i => i.id === rIns.id);
+      if (!local) {
+        inspections.push(rIns);
+        changed = true;
+      } else if ((rIns.updatedAt || 0) > (local.updatedAt || 0)) {
+        const keepPhoto = local.roomPhoto;
+        const photos = {};
+        Object.entries(local.items || {}).forEach(([k, st]) => {
+          if (st?.remark?.photo) photos[k] = st.remark.photo;
+        });
+        Object.assign(local, rIns);
+        local.roomPhoto = keepPhoto || local.roomPhoto;
+        Object.entries(photos).forEach(([k, photo]) => {
+          if (local.items?.[k]?.remark) local.items[k].remark.photo = photo;
+        });
+        changed = true;
+      }
+    });
+    for (const insp of inspections) {
+      const remoteMatch = remote.find(r => r.id === insp.id);
+      if (!remoteMatch || (insp.updatedAt || 0) > (remoteMatch.updatedAt || 0)) {
+        await Cloud.push(insp);
+      }
+    }
+    if (changed) { persist(); renderHome(); }
+  } catch {
+    showToast("Synchronisation impossible (hors-ligne ?)");
+  }
+}
+
 /* ============ Démarrage ============ */
 renderHome();
+syncCloud();
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("sw.js").catch(() => {});
 }
