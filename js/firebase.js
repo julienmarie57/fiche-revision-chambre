@@ -1,11 +1,11 @@
 const FIREBASE_CONFIG = {
-  apiKey: "A_REMPLACER",
-  authDomain: "A_REMPLACER",
-  databaseURL: "A_REMPLACER",
-  projectId: "A_REMPLACER",
-  storageBucket: "A_REMPLACER",
-  messagingSenderId: "A_REMPLACER",
-  appId: "A_REMPLACER"
+  apiKey: "AIzaSyAyOg42eL55Z2l1r1rCa6hPqNgnponpdfA",
+  authDomain: "revision-chambre.firebaseapp.com",
+  databaseURL: "https://revision-chambre-default-rtdb.europe-west1.firebasedatabase.app",
+  projectId: "revision-chambre",
+  storageBucket: "revision-chambre.firebasestorage.app",
+  messagingSenderId: "25945545991",
+  appId: "1:25945545991:web:0e1f8df6e388a4e96a79a2"
 };
 
 const FIREBASE_ENABLED = !Object.values(FIREBASE_CONFIG).includes("A_REMPLACER");
