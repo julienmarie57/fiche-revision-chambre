@@ -253,9 +253,14 @@ document.getElementById("btn-banner-recap").addEventListener("click", () => {
 
 function renderSyncStatus() {
   const el = document.getElementById("sync-status");
-  el.textContent = Cloud.enabled
-    ? "☁️ Synchronisation Firebase active"
-    : "Mode local (données sur cet appareil uniquement). Config Firebase à renseigner dans js/firebase.js pour la synchronisation.";
+  if (!Cloud.enabled) {
+    el.textContent = "Mode local (données sur cet appareil uniquement). Config Firebase à renseigner dans js/firebase.js pour la synchronisation.";
+    return;
+  }
+  const err = Cloud.lastError();
+  el.textContent = err
+    ? "⚠️ Erreur de synchronisation : " + err
+    : "☁️ Synchronisation Firebase active";
 }
 
 /* ============ Nouvelle inspection ============ */
@@ -1164,9 +1169,10 @@ async function syncCloud() {
         await Cloud.push(insp);
       }
     }
-    if (changed) { persist(); renderHome(); }
+    if (changed) { persist(); }
+    renderHome();
   } catch {
-    showToast("Synchronisation impossible (hors-ligne ?)");
+    renderHome();
   }
 }
 
